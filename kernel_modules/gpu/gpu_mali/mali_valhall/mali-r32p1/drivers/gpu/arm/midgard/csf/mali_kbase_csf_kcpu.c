@@ -666,9 +666,8 @@ static int kbase_csf_queue_group_suspend_prepare(
 		    (kbase_reg_current_backed_size(reg) < nr_pages) ||
 		    !(reg->flags & KBASE_REG_CPU_WR) ||
 		    (reg->gpu_alloc->type != KBASE_MEM_TYPE_NATIVE) ||
-		    (reg->flags & KBASE_REG_DONT_NEED) ||
-		    (reg->flags & KBASE_REG_ACTIVE_JIT_ALLOC) ||
-		    (reg->flags & KBASE_REG_NO_USER_FREE)) {
+		    (kbase_is_region_shrinkable(reg)) ||
+		    (kbase_va_region_is_no_user_free(kctx, reg))) {
 			ret = -EINVAL;
 			goto out_clean_pages;
 		}
@@ -1633,25 +1632,23 @@ static void kcpu_queue_cmds_timeout_worker(struct work_struct *data)
 		spin_lock(&kctx->kbdev->reset_force_change);
 		kctx->kbdev->reset_force_evict_group_work = true;
 		spin_unlock(&kctx->kbdev->reset_force_change);
-		if (kctx->kbdev->pm.backend.gpu_powered) {
-			if (kbase_prepare_to_reset_gpu(kctx->kbdev, RESET_FLAGS_NONE)) {
-				dev_info(kctx->kbdev->dev, "KCPU queue command timeouts(%d ms)! Trigger GPU reset", COMMAND_TIMEOUT_MS);
+		if (kbase_prepare_to_reset_gpu(kctx->kbdev, RESET_FLAGS_NONE)) {
+			dev_info(kctx->kbdev->dev, "KCPU queue command timeouts(%d ms)! Trigger GPU reset", COMMAND_TIMEOUT_MS);
 #if IS_ENABLED(CONFIG_MALI_MTK_DEBUG)
-				ged_log_buf_print2(
-					kctx->kbdev->ged_log_buf_hnd_kbase, GED_LOG_ATTR_TIME,
-					"KCPU queue command timeouts(%d ms)! Trigger GPU reset\n",
-					COMMAND_TIMEOUT_MS);
+			ged_log_buf_print2(
+				kctx->kbdev->ged_log_buf_hnd_kbase, GED_LOG_ATTR_TIME,
+				"KCPU queue command timeouts(%d ms)! Trigger GPU reset\n",
+				COMMAND_TIMEOUT_MS);
 #endif
-				kbase_reset_gpu(kctx->kbdev);
-			} else {
-				dev_info(kctx->kbdev->dev, "KCPU queue command timeouts(%d ms)! Other threads are already resetting the GPU", COMMAND_TIMEOUT_MS);
+			kbase_reset_gpu(kctx->kbdev);
+		} else {
+			dev_info(kctx->kbdev->dev, "KCPU queue command timeouts(%d ms)! Other threads are already resetting the GPU", COMMAND_TIMEOUT_MS);
 #if IS_ENABLED(CONFIG_MALI_MTK_DEBUG)
-				ged_log_buf_print2(
-					kctx->kbdev->ged_log_buf_hnd_kbase, GED_LOG_ATTR_TIME,
-					"KCPU queue command timeouts(%d ms)! Other threads are already resetting the GPU\n",
-					COMMAND_TIMEOUT_MS);
+			ged_log_buf_print2(
+				kctx->kbdev->ged_log_buf_hnd_kbase, GED_LOG_ATTR_TIME,
+				"KCPU queue command timeouts(%d ms)! Other threads are already resetting the GPU\n",
+				COMMAND_TIMEOUT_MS);
 #endif
-			}
 		}
 	}
 #endif /* CONFIG_MALI_MTK_TIMEOUT_RESET */

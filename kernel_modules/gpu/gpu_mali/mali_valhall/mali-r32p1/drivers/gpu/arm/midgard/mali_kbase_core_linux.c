@@ -1495,6 +1495,9 @@ static int kbasep_kcpu_queue_enqueue(struct kbase_context *kctx,
 static int kbasep_cs_tiler_heap_init(struct kbase_context *kctx,
 		union kbase_ioctl_cs_tiler_heap_init *heap_init)
 {
+	if (heap_init->in.group_id >= MEMORY_GROUP_MANAGER_NR_GROUPS)
+		return -EINVAL;
+
 	kctx->jit_group_id = heap_init->in.group_id;
 
 	return kbase_csf_tiler_heap_init(kctx, heap_init->in.chunk_size,
@@ -1703,28 +1706,27 @@ static int kbasep_ioctl_local_fence_wait(struct kbase_context *kctx,
 		spin_lock(&kctx->kbdev->reset_force_change);
 		kctx->kbdev->reset_force_evict_group_work = true;
 		spin_unlock(&kctx->kbdev->reset_force_change);
-		if (kctx->kbdev->pm.backend.gpu_powered) {
-			if (kbase_prepare_to_reset_gpu(kctx->kbdev, RESET_FLAGS_NONE)) {
-				dev_info(kctx->kbdev->dev, "internal fence timeouts(%llu ms)! Trigger GPU reset",
-				         fence_wait->time_in_microseconds);
+		if (kbase_prepare_to_reset_gpu(kctx->kbdev, RESET_FLAGS_NONE)) {
+			dev_info(kctx->kbdev->dev, "internal fence timeouts(%llu ms)! Trigger GPU reset",
+					 fence_wait->time_in_microseconds);
 #if IS_ENABLED(CONFIG_MALI_MTK_DEBUG)
-				ged_log_buf_print2(
-					kctx->kbdev->ged_log_buf_hnd_kbase, GED_LOG_ATTR_TIME,
-					"internal fence timeouts(%llu ms)! Trigger GPU reset\n",
-					fence_wait->time_in_microseconds);
+			ged_log_buf_print2(
+				kctx->kbdev->ged_log_buf_hnd_kbase, GED_LOG_ATTR_TIME,
+				"internal fence timeouts(%llu ms)! Trigger GPU reset\n",
+				fence_wait->time_in_microseconds);
 #endif
-				kbase_reset_gpu(kctx->kbdev);
-			} else {
-				dev_info(kctx->kbdev->dev, "internal fence timeouts(%llu ms)! Other threads are already resetting the GPU",
-				         fence_wait->time_in_microseconds);
+			kbase_reset_gpu(kctx->kbdev);
+		} else {
+			dev_info(kctx->kbdev->dev, "internal fence timeouts(%llu ms)! Other threads are already resetting the GPU",
+					 fence_wait->time_in_microseconds);
 #if IS_ENABLED(CONFIG_MALI_MTK_DEBUG)
-				ged_log_buf_print2(
-					kctx->kbdev->ged_log_buf_hnd_kbase, GED_LOG_ATTR_TIME,
-					"internal fence timeouts(%llu ms)! Other threads are already resetting the GPU\n",
-					fence_wait->time_in_microseconds);
+			ged_log_buf_print2(
+				kctx->kbdev->ged_log_buf_hnd_kbase, GED_LOG_ATTR_TIME,
+				"internal fence timeouts(%llu ms)! Other threads are already resetting the GPU\n",
+				fence_wait->time_in_microseconds);
 #endif
-			}
 		}
+
 	}
 #endif
 

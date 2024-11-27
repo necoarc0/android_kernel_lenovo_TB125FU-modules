@@ -156,7 +156,7 @@ static int thermal_print_header(char *buf, int len)
 	char ts_buf[8] = {0};
 	unsigned int u4ValidSensor = 0;
 	int i = 0, ts_sz = 0;
-	unsigned int str_len = 0;
+	int str_len = 0;
 
 	u4ValidSensor = CheckAvailableThermalSensor(0);
 
@@ -297,7 +297,7 @@ static int thermal_CPU_print_header(char *buf, int len)
 	char ts_buf[8] = {0} ;
 	unsigned int u4ValidSensor = 0;
 	int i = 0, ts_sz = 0;
-	unsigned int str_len = 0;
+	int str_len = 0;
 
 	u4ValidSensor = CheckAvailableCPUThermalSensor(0);
 
