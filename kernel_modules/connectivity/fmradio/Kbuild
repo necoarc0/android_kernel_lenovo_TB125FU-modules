@@ -15,13 +15,7 @@ endif
 # Force build fail on modpost warning
 KBUILD_MODPOST_FAIL_ON_WARNINGS := y
 ###############################################################################
-CONNINFRA_SRC_FOLDER := $(TOP)conninfra/
-WMT_SRC_FOLDER := $(TOP)common/
-WMT_INCLUDE_PATH := common_main
 
-ccflags-y += -I$(CONNINFRA_SRC_FOLDER)/include
-ccflags-y += -I$(WMT_SRC_FOLDER)/$(WMT_INCLUDE_PATH)/include \
-             -I$(WMT_SRC_FOLDER)/$(WMT_INCLUDE_PATH)/linux/include
 # only WMT align this design flow
 #ccflags-y += -D MTK_WCN_REMOVE_KERNEL_MODULE
 
@@ -179,4 +173,3 @@ $(MODULE_NAME)-objs += $($(FM_CHIP)-objs)
 #obj-$(CONFIG_MTK_FMRADIO) += private/
 
 obj-y += dummy.o
-
