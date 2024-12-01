@@ -100,7 +100,7 @@ int mtk_common_gpufreq_commit(int opp_idx)
 			-1 : gpufreq_commit(TARGET_DEFAULT, opp_idx);
 #else
 		ret = mtk_common_gpufreq_bringup() ?
-			-1 : mt_gpufreq_target(opp_idx, KIR_POLICY);
+			-1 : mt_gpufreq_target(opp_idx);
 #endif /* CONFIG_MTK_GPUFREQ_V2 */
 	}
 	mutex_unlock(&mfg_pm_lock);
