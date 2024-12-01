@@ -1,24 +1,12 @@
-/*! \file
-    \brief  Declaration of library functions
-    Any definitions in this file will be shared among GLUE Layer and internal Driver Stack.
-*/
-#ifndef _OSAL_H_
-#define _OSAL_H_
-#include <linux/version.h>
-#include <linux/init.h>
-#include <linux/module.h>
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * osal.h - OS Abstraction Layer Definitions
+ */
+
+#ifndef __OSAL_H__
+#define __OSAL_H__
+
 #include <linux/types.h>
-#include <linux/kernel.h>
-#include <linux/fs.h>
-#include <linux/cdev.h>
-#include <linux/sched.h>
-#include <linux/poll.h>
-#include <asm/current.h>
-#include <asm/uaccess.h>
-#include <linux/proc_fs.h>
-#include <linux/workqueue.h>
-#include <linux/wait.h>
-#include <linux/time.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/vmalloc.h>
@@ -30,14 +18,16 @@
 #include <aee.h>
 #endif
 #include <linux/kfifo.h>
-#include <linux/wakelock.h>
+#include <linux/pm_wakeup.h>
 #include <linux/log2.h>
 #include <asm/atomic.h>
 #include "osal_typedef.h"
+
 /*******************************************************************************
 *                         C O M P I L E R   F L A G S
 ********************************************************************************
 */
+
 /*******************************************************************************
 *                                 M A C R O S
 ********************************************************************************
@@ -179,7 +169,7 @@ typedef struct _OSAL_LXOP_Q {
 	P_OSAL_OP queue[OSAL_OP_BUF_SIZE];
 } OSAL_OP_Q, *P_OSAL_OP_Q;
 typedef struct _OSAL_WAKE_LOCK_ {
-	struct wake_lock wake_lock;
+	struct wakeup_source *ws;
 	UINT8 name[MAX_WAKE_LOCK_NAME_LEN];
 } OSAL_WAKE_LOCK, *P_OSAL_WAKE_LOCK;
 #if 1
@@ -309,4 +299,4 @@ extern UINT16 osal_crc16(const PUINT8 buffer, const UINT32 length);
 	if (!(condition)) \
 		osal_err_print("%s, %d, (%s)\n", __FILE__, __LINE__, #condition); \
 }
-#endif				/* _OSAL_H_ */
+#endif					/* __OSAL_H__ */
