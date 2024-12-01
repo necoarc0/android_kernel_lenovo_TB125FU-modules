@@ -182,6 +182,14 @@ typedef enum _ENUM_WMT_ANT_RAM_STATUS_T {
 	WMT_ANT_RAM_OP_ERR = WMT_ANT_RAM_PARA_ERR + 1,
 	WMT_ANT_RAM_MAX
 } ENUM_WMT_ANT_RAM_STATUS, *P_ENUM_WMT_ANT_RAM_STATUS;
+typedef enum {
+	CMB_STUB_AIF_0 = 0,	/* 0000: BT_PCM_OFF & FM analog (line in/out) */
+	CMB_STUB_AIF_1 = 1,	/* 0001: BT_PCM_ON & FM analog (in/out) */
+	CMB_STUB_AIF_2 = 2,	/* 0010: BT_PCM_OFF & FM digital (I2S) */
+	CMB_STUB_AIF_3 = 3,	/* 0011: BT_PCM_ON & FM digital (I2S) (invalid in 73evb & 1.2 phone configuration) */
+	CMB_STUB_AIF_4 = 4, /* 0100: BT_I2S & FM disable in special projects, e.g. protea*/
+	CMB_STUB_AIF_MAX = 5,
+} CMB_STUB_AIF_X;
 /*******************************************************************************
 *                            P U B L I C   D A T A
 ********************************************************************************
