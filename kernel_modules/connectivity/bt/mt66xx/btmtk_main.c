@@ -339,9 +339,9 @@ static void btmtk_main_info_initialize(void)
 	main_info.woble_ws = wakeup_source_register(NULL, "btmtk_woble_wakelock");
 	main_info.eint_ws = wakeup_source_register(NULL, "btevent_eint");
 #else
-	main_info.fwdump_ws = wakeup_source_register("btmtk_fwdump_wakelock");
-	main_info.woble_ws = wakeup_source_register("btmtk_woble_wakelock");
-	main_info.eint_ws = wakeup_source_register("btevent_eint");
+	main_info.fwdump_ws = wakeup_source_register(NULL, "btmtk_fwdump_wakelock");
+	main_info.woble_ws = wakeup_source_register(NULL, "btmtk_woble_wakelock");
+	main_info.eint_ws = wakeup_source_register(NULL, "btevent_eint");
 #endif
 
 	main_info.wmt_over_hci_header[0] = HCI_COMMAND_PKT;
