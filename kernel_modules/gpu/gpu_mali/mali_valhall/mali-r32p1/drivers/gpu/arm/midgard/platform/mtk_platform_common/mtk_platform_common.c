@@ -154,7 +154,7 @@ static int mtk_common_gpu_utilization_show(struct seq_file *m, void *v)
 
     return 0;
 }
-DEFINE_SHOW_ATTRIBUTE(mtk_common_gpu_utilization_show);
+DEFINE_PROC_SHOW_ATTRIBUTE(mtk_common_gpu_utilization_show_open);
 
 static int mtk_common_gpu_memory_show(struct seq_file *m, void *v)
 {
