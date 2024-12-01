@@ -5429,7 +5429,7 @@ static int btmtk_sdio_probe(struct sdio_func *func,
 #ifdef CONFIG_MP_WAKEUP_SOURCE_SYSFS_STAT
 		g_card->woble_ws = wakeup_source_register(NULL, "btevent_woble");
 #else
-		g_card->woble_ws = wakeup_source_register("btevent_woble");
+		g_card->woble_ws = wakeup_source_register(NULL, "btevent_woble");
 #endif
 		if (!g_card->woble_ws) {
 			BTMTK_WARN("woble_ws register fail!");
@@ -5441,7 +5441,7 @@ static int btmtk_sdio_probe(struct sdio_func *func,
 #ifdef CONFIG_MP_WAKEUP_SOURCE_SYSFS_STAT
 		g_card->eint_ws = wakeup_source_register(NULL, "btevent_eint");
 #else
-		g_card->eint_ws = wakeup_source_register("btevent_eint");
+		g_card->eint_ws = wakeup_source_register(NULL, "btevent_eint");
 #endif
 		if (!g_card->eint_ws) {
 			wakeup_source_unregister(g_card->woble_ws);
@@ -5457,7 +5457,7 @@ static int btmtk_sdio_probe(struct sdio_func *func,
 #ifdef CONFIG_MP_WAKEUP_SOURCE_SYSFS_STAT
 		g_card->lp_ws = wakeup_source_register(NULL, "btevent_lp");
 #else
-		g_card->lp_ws = wakeup_source_register("btevent_lp");
+		g_card->lp_ws = wakeup_source_register(NULL, "btevent_lp");
 #endif
 #endif
 	sema_init(&g_priv->wr_mtx, 1);
