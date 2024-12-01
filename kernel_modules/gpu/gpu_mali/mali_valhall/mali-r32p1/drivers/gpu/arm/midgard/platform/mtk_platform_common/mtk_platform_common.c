@@ -154,8 +154,9 @@ static int mtk_common_gpu_utilization_show(struct seq_file *m, void *v)
 
     return 0;
 }
+#if IS_ENABLED(CONFIG_PROC_FS)
 DEFINE_PROC_SHOW_ATTRIBUTE(mtk_common_gpu_utilization_show);
-
+#endif
 static int mtk_common_gpu_memory_show(struct seq_file *m, void *v)
 {
 #if IS_ENABLED(CONFIG_MALI_MTK_MEM_TRACK)
