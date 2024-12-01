@@ -37,6 +37,12 @@
 #define VERSION "7.0.2020121701"
 #define SUBVER ":turnkey"
 
+/* Add missing definitions */
+#define NOTIFY_ALT_EVT_LEN 7
+#define HCI_MAX_ISO_SIZE 340
+#define LD_PATCH_CMD_LEN 9
+#define READ_ADDRESS_EVT_PAYLOAD_OFFSET 7
+#define WOBLE_DEBUG_EVT_TYPE 0xE8
 
 #define ENABLESTP FALSE
 #define BTMTKUART_TX_STATE_ACTIVE	1
