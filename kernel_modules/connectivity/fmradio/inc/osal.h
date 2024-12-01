@@ -30,7 +30,7 @@
 #include <aee.h>
 #endif
 #include <linux/kfifo.h>
-#include <linux/pm_wakeup.h>
+#include <linux/wakelock.h>
 #include <linux/log2.h>
 #include <asm/atomic.h>
 #include "osal_typedef.h"
