@@ -68,3 +68,4 @@ int gps_dl_set_rx_transfer_max(enum gps_dl_link_id_enum link_id, int max);
 int gps_dl_set_tx_transfer_max(enum gps_dl_link_id_enum link_id, int max);
 
 #endif /* _GPS_DL_CONTEXT_H */
+

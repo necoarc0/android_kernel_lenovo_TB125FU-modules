@@ -96,3 +96,4 @@
 #define GPS_USRT_APB_MCU_A2D1_A2D_1_SHFT                       0
 
 #endif /* __GPS_USRT_APB_REGS_H__ */
+

@@ -49,3 +49,4 @@
 #define CONN_UART_PTA_FRACDIV_M_FRACDIV_M_SHFT                 0
 
 #endif /* __CONN_UART_PTA_REGS_H__ */
+

@@ -2550,14 +2550,22 @@ P_SW_RFB_T qmHandleRxPackets(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfbList
 		}
 #endif /* CFG_SUPPORT_FAKE_EAPOL_DETECTION */
 
-		if (prCurrSwRfb->fgDataFrame) {
+		if (prCurrSwRfb->fgReorderBuffer && !fgIsBMC && fgIsHTran) {
+			/* If this packet should dropped or indicated to the host immediately,
+			 *  it should be enqueued into the rReturnedQue with specific flags. If
+			 *  this packet should be buffered for reordering, it should be enqueued
+			 *  into the reordering queue in the STA_REC rather than into the
+			 *  rReturnedQue.
+			 */
+			qmProcessPktWithReordering(prAdapter, prCurrSwRfb, prReturnedQue);
+
+		} else if (prCurrSwRfb->fgDataFrame) {
 			/* Check Class Error */
 			if (secCheckClassError(prAdapter, prCurrSwRfb, prCurrSwRfb->prStaRec) == TRUE) {
 				P_RX_BA_ENTRY_T prReorderQueParm = NULL;
-				P_HW_MAC_RX_DESC_T prRS = NULL;
 
 				/* Invalid BA aggrement */
-				if (fgIsHTran && !prCurrSwRfb->fgReorderBuffer) {
+				if (fgIsHTran) {
 					UINT_16 u2FrameCtrl = 0;
 
 					u2FrameCtrl = HAL_RX_STATUS_GET_FRAME_CTL_FIELD(prCurrSwRfb->prRxStatusGroup4);
@@ -2568,31 +2576,13 @@ P_SW_RFB_T qmHandleRxPackets(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfbList
 						>= CFG_RX_MAX_BA_TID_NUM)) {
 						DBGLOG(QM, TRACE, "FC [0x%04X], no-reordering...\n", u2FrameCtrl);
 					} else {
-						/* Get TID for BA entry */
-						prRS = prCurrSwRfb->prRxStatus;
-						prCurrSwRfb->ucTid = HAL_RX_STATUS_GET_TID(prRS);
 						prReorderQueParm =
 						    ((prCurrSwRfb->prStaRec->
 						      aprRxReorderParamRefTbl)[prCurrSwRfb->ucTid]);
 					}
-				} else {
-					if (fgIsHTran &&
-						(prCurrSwRfb->ucTid
-						< CFG_RX_MAX_BA_TID_NUM)) {
-					/* Get TID for BA entry */
-					prRS = prCurrSwRfb->prRxStatus;
-					prCurrSwRfb->ucTid =
-						 HAL_RX_STATUS_GET_TID(prRS);
-					prReorderQueParm =
-						((prCurrSwRfb->prStaRec->
-						aprRxReorderParamRefTbl)
-						[prCurrSwRfb->ucTid]);
-					}
 				}
-				/* Only UC with valid BA entry */
-				/* pass to reordering */
-				if (prReorderQueParm && !fgIsBMC &&
-					prReorderQueParm->fgIsValid)
+
+				if (prReorderQueParm && prReorderQueParm->fgIsValid && !fgIsBMC)
 					qmProcessPktWithReordering(prAdapter, prCurrSwRfb, prReturnedQue);
 				else
 					qmHandleRxPackets_AOSP_1;
@@ -2880,7 +2870,7 @@ u_int8_t qmAmsduAttackDetection(IN P_ADAPTER_T prAdapter,
 	}
 
 	/* 802.11 header RA */
-	ucBssIndex = prStaRec->ucBssIndex;
+	ucBssIndex = secGetBssIdxByWlanIdx(prAdapter, prSwRfb->ucWlanIdx);
 	/* Handle if  out of bss index range*/
 	if (ucBssIndex > HW_BSSID_NUM) {
 		DBGLOG(QM, INFO,

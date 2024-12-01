@@ -261,10 +261,8 @@ static int btmtk_pm_notifier_callback(struct notifier_block *nb,
 
 	switch (event) {
 		case PM_SUSPEND_PREPARE:
-			if(cif_dev->bt_state != FUNC_ON) {
-				BTMTK_INFO("%s: bt_state[%d], event[%ld]",
-						__func__, cif_dev->bt_state, event);
-			}
+			BTMTK_INFO("%s: bt_state[%d], event[%ld]",
+					__func__, cif_dev->bt_state, event);
 		case PM_POST_SUSPEND:
 			if(cif_dev->bt_state == FUNC_ON) {
 				bt_dump_bgfsys_suspend_wakeup_debug();
@@ -1578,9 +1576,7 @@ static int btmtk_cif_probe(struct platform_device *pdev)
 	/* 8. Register screen on/off & suspend/wakup notify callback */
 	cif_dev->blank_state = WMT_PARA_SCREEN_ON;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
-	if (mtk_disp_notifier_register("btmtk_disp_notifier", &btmtk_disp_notifier)) {
-		BTMTK_ERR("Register mtk_disp_notifier failed\n");
-	}
+	mtk_disp_notifier_register("btmtk_disp_notifier", &btmtk_disp_notifier);
 #else
 	btmtk_fb_notify_register();
 #endif

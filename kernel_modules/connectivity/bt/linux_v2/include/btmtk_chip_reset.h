@@ -21,3 +21,4 @@ void btmtk_reset_trigger(struct btmtk_dev *bdev);
 void btmtk_reset_waker(struct work_struct *work);
 
 #endif /* __BTMTK_WOBLE_H__ */
+

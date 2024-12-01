@@ -1,54 +1,7 @@
-/******************************************************************************
- *
- * This file is provided under a dual license.  When you use or
- * distribute this software, you may choose to be licensed under
- * version 2 of the GNU General Public License ("GPLv2 License")
- * or BSD License.
- *
- * GPLv2 License
- *
- * Copyright(C) 2016 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * BSD LICENSE
- *
- * Copyright(C) 2016 MediaTek Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2016 MediaTek Inc.
+ */
 /*! \file   mt7915.c
 *    \brief  Internal driver stack will export
 *    the required procedures here for GLUE Layer.
@@ -218,7 +171,7 @@ uint16_t wlanHarrierUsbRxByteCount(
 static void wlanHarrierInitPcieInt(
 	struct GLUE_INFO *prGlueInfo)
 {
-	uint32_t u4MacVal, u4MacVal1;
+	uint32_t u4MacVal;
 
 	/* Backup original setting */
 	HAL_MCR_RD(prGlueInfo->prAdapter,
@@ -233,16 +186,6 @@ static void wlanHarrierInitPcieInt(
 	HAL_MCR_WR(prGlueInfo->prAdapter,
 		0xF11AC,
 		0x7403);
-
-	while (1) {
-		HAL_MCR_RD(prGlueInfo->prAdapter,
-			0xF11AC,
-			&u4MacVal1);
-
-		if (u4MacVal1 == 0x18007403)
-			break;
-	}
-
 	HAL_MCR_WR(prGlueInfo->prAdapter,
 		0xE0188,
 		0x000000FF);
@@ -257,31 +200,31 @@ static bool mt7915WfdmaAllocRxRing(
 	struct GLUE_INFO *prGlueInfo,
 	bool fgAllocMem)
 {
-	if (!halWpdmaAllocRxRing(prGlueInfo, RX_RING_DATA1_IDX_2,
-			RX_RING_SIZE, RXD_SIZE, RX_BUFFER_AGGRESIZE,
-			fgAllocMem)) {
-		DBGLOG(HAL, ERROR, "AllocWfdmaRxRing fail\n");
-		return false;
-	}
-	if (!halWpdmaAllocRxRing(prGlueInfo, RX_RING_TXDONE0_IDX_3,
+	if (!halWpdmaAllocRxRing(prGlueInfo, WFDMA0_RX_RING_IDX_2,
 			RX_RING1_SIZE, RXD_SIZE, RX_BUFFER_AGGRESIZE,
 			fgAllocMem)) {
 		DBGLOG(HAL, ERROR, "AllocWfdmaRxRing fail\n");
 		return false;
 	}
-	if (!halWpdmaAllocRxRing(prGlueInfo, RX_RING_TXDONE1_IDX_4,
+	if (!halWpdmaAllocRxRing(prGlueInfo, WFDMA0_RX_RING_IDX_3,
 			RX_RING1_SIZE, RXD_SIZE, RX_BUFFER_AGGRESIZE,
 			fgAllocMem)) {
 		DBGLOG(HAL, ERROR, "AllocWfdmaRxRing fail\n");
 		return false;
 	}
-	if (!halWpdmaAllocRxRing(prGlueInfo, RX_RING_WAEVT0_IDX_5,
+	if (!halWpdmaAllocRxRing(prGlueInfo, WFDMA1_RX_RING_IDX_0,
+			RX_RING1_SIZE, RXD_SIZE, RX_BUFFER_AGGRESIZE,
+			fgAllocMem)) {
+		DBGLOG(HAL, ERROR, "AllocWfdmaRxRing fail\n");
+		return false;
+	}
+	if (!halWpdmaAllocRxRing(prGlueInfo, WFDMA1_RX_RING_IDX_1,
 			RX_RING_SIZE, RXD_SIZE, RX_BUFFER_AGGRESIZE,
 			fgAllocMem)) {
 		DBGLOG(HAL, ERROR, "AllocWfdmaRxRing fail\n");
 		return false;
 	}
-	if (!halWpdmaAllocRxRing(prGlueInfo, RX_RING_WAEVT1_IDX_6,
+	if (!halWpdmaAllocRxRing(prGlueInfo, WFDMA1_RX_RING_IDX_2,
 			RX_RING_SIZE, RXD_SIZE, RX_BUFFER_AGGRESIZE,
 			fgAllocMem)) {
 		DBGLOG(HAL, ERROR, "AllocWfdmaRxRing fail\n");
@@ -461,6 +404,8 @@ struct BUS_INFO mt7915_bus_info = {
 	.u4DmaMask = 32,
 
 	.pdmaSetup = asicConnac2xWpdmaConfig,
+	.pdmaStop = asicConnac2xWfdmaStop,
+	.pdmaPollingIdle = asicConnac2xWfdmaPollingAllIdle,
 	.enableInterrupt = asicConnac2xEnableExtInterrupt,
 	.disableInterrupt = asicConnac2xDisableExtInterrupt,
 	.processTxInterrupt = asicConnac2xProcessTxInterrupt,
@@ -479,6 +424,7 @@ struct BUS_INFO mt7915_bus_info = {
 	.initPcieInt = wlanHarrierInitPcieInt,
 	.devReadIntStatus = asicConnac2xReadExtIntStatus,
 	.DmaShdlInit = NULL,
+	.DmaShdlReInit = NULL,
 	.wfdmaAllocRxRing = mt7915WfdmaAllocRxRing,
 #endif				/* _HIF_PCIE */
 #if defined(_HIF_USB)
@@ -495,11 +441,17 @@ struct BUS_INFO mt7915_bus_info = {
 	     CONNAC2X_UDMA_WLCFG_0_TICK_1US_EN(1)),
 	.u4UdmaTxTimeout = CONNAC2X_UDMA_TX_TIMEOUT_LIMIT,
 	.u4SuspendVer = SUSPEND_V2,
+	.fgIsSupportWdtEp = FALSE,
 	.asicUsbSuspend = NULL,	/*asicUsbSuspend*/
 	.asicUsbResume = asicConnac2xUsbResume,
 	.asicUsbEventEpDetected = asicConnac2xUsbEventEpDetected,
 	.asicUsbRxByteCount = wlanHarrierUsbRxByteCount,
 	.DmaShdlInit = NULL,
+	.DmaShdlReInit = NULL,
+	.asicUdmaRxFlush = asicConnac2xUdmaRxFlush,
+#if CFG_CHIP_RESET_SUPPORT
+	.asicUsbEpctlRstOpt = NULL,
+#endif
 #endif				/* _HIF_USB */
 #if defined(_HIF_SDIO)
 	.halTxGetFreeResource = halTxGetFreeResource_v1,
@@ -517,7 +469,6 @@ struct FWDL_OPS_T mt7915_fw_dl_ops = {
 	.downloadByDynMemMap = NULL,
 	.getFwInfo = wlanGetConnacFwInfo,
 	.getFwDlInfo = asicGetFwDlInfo,
-	.phyAction = NULL,
 };
 #endif				/* CFG_ENABLE_FW_DOWNLOAD */
 
@@ -540,16 +491,13 @@ struct CHIP_DBG_OPS mt7915_debug_ops = {
 	.showUmacFwtblInfo = connac2x_show_umac_wtbl_info,
 	.showCsrInfo = NULL,
 	.showDmaschInfo = NULL,
-	.dumpMacInfo = NULL,
-	.dumpTxdInfo = NULL,
 	.showHifInfo = NULL,
 	.printHifDbgInfo = NULL,
 	.show_rx_rate_info = connac2x_show_rx_rate_info,
 	.show_rx_rssi_info = connac2x_show_rx_rssi_info,
 	.show_stat_info = connac2x_show_stat_info,
-#ifdef CFG_SUPPORT_LINK_QUALITY_MONITOR
-	.get_rx_rate_info = connac2x_get_rx_rate_info
-#endif
+	.show_mcu_debug_info = NULL,
+	.show_conninfra_debug_info = NULL,
 };
 
 /* Litien code refine to support multi chip */
@@ -571,11 +519,11 @@ struct mt66xx_chip_info mt66xx_chip_info_mt7915 = {
 	.is_support_wacpu = TRUE,
 	.txd_append_size = MT7915_TX_DESC_APPEND_LENGTH,
 	.rxd_size = MT7915_RX_DESC_LENGTH,
-	.init_evt_rxd_size = MT7915_RX_DESC_LENGTH,
 	.pse_header_length = CONNAC2X_NIC_TX_PSE_HEADER_LENGTH,
 	.init_event_size = CONNAC2X_RX_INIT_EVENT_LENGTH,
 	.eco_info = mt7915_eco_table,
 	.isNicCapV1 = FALSE,
+	.is_support_efuse = TRUE,
 	.top_hcr = CONNAC2X_TOP_HCR,
 	.top_hvr = CONNAC2X_TOP_HVR,
 	.top_fvr = CONNAC2X_TOP_FVR,
@@ -592,8 +540,10 @@ struct mt66xx_chip_info mt66xx_chip_info_mt7915 = {
 	.asicEnableFWDownload = NULL,
 #endif				/* CFG_ENABLE_FW_DOWNLOAD */
 	.asicGetChipID = NULL,
-	.downloadBufferBin = wlanConnacDownloadBufferBin,
+	.downloadBufferBin = wlanConnac2XDownloadBufferBin,
 	.is_support_hw_amsdu = TRUE,
+	.prTxPwrLimitFile = "TxPwrLimit_MT79x5.dat",
+	.ucTxPwrLimitBatchSize = 8,
 	.is_support_asic_lp = TRUE,
 	.is_support_wfdma1 = TRUE,
 	.asicWfdmaReInit = asicConnac2xWfdmaReInit,
@@ -602,7 +552,16 @@ struct mt66xx_chip_info mt66xx_chip_info_mt7915 = {
 	.wlanCheckAsicCap = mt7915CheckAsicCap,
 	.u4LmacWtblDUAddr = CONNAC2X_WIFI_LWTBL_BASE,
 	.u4UmacWtblDUAddr = CONNAC2X_WIFI_UWTBL_BASE,
-	.cmd_max_pkt_size = CFG_TX_MAX_PKT_SIZE, /* size 1600 */
+
+#if CFG_CHIP_RESET_SUPPORT
+	.asicWfsysRst = NULL,
+	.asicPollWfsysSwInitDone = NULL,
+#endif
+
+	/* leave it to project owner */
+	.uc2G4HeCapMaxAmpduLenExp = 0,
+	.uc5GHeCapMaxAmpduLenExp = 0,
+	.loadCfgSetting = NULL,
 };
 
 struct mt66xx_hif_driver_data mt66xx_driver_data_mt7915 = {

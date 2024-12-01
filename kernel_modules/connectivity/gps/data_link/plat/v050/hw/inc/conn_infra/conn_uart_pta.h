@@ -11,3 +11,4 @@
 
 
 #endif /* __CONN_UART_PTA_REGS_H__ */
+

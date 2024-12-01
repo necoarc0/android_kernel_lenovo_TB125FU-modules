@@ -20,3 +20,4 @@ void gps_dl_hist_rec2_disable_data_routing(void);
 void gps_dl_hist_rec2_enable_data_routing(void);
 
 #endif /* _GPS_DL_HIST_REC2_H */
+

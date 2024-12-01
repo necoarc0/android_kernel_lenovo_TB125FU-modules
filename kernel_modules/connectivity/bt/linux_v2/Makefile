@@ -91,6 +91,7 @@ CFILES += btmtk_main.c btmtk_fw_log.c
 ccflags-y += -I$(src)/include/ -I$(KERNEL_SRC)/include/ -I$(KERNEL_SRC)/drivers/bluetooth
 
 ccflags-y += -DLINUX_OS
+ccflags-y += -Werror
 
 $(MOD_NAME)-objs := $(CFILES:.c=.o)
 
@@ -136,3 +137,4 @@ ccs:
 	./util/checkpatch.pl -f btmtk_buffer_mode.c
 	./util/checkpatch.pl -f btmtk_woble.c
 	./util/checkpatch.pl -f btmtk_chip_reset.c
+

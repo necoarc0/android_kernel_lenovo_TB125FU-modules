@@ -1383,3 +1383,4 @@ int connsys_dedicated_log_set_ap_state(int state)
 	EMI_WRITE32(gDev.virAddrEmiLogBase + 32,  state);
 	return 0;
 }
+

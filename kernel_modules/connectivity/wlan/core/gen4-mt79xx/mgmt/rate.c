@@ -1,54 +1,7 @@
-/******************************************************************************
- *
- * This file is provided under a dual license.  When you use or
- * distribute this software, you may choose to be licensed under
- * version 2 of the GNU General Public License ("GPLv2 License")
- * or BSD License.
- *
- * GPLv2 License
- *
- * Copyright(C) 2016 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * BSD LICENSE
- *
- * Copyright(C) 2016 MediaTek Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2016 MediaTek Inc.
+ */
 /*
  * Id: //Department/DaVinci/BRANCHES/MT6620_WIFI_DRIVER_V2_3/mgmt/rate.c#1
  */
@@ -170,16 +123,14 @@ const u_int8_t afgIsOFDMRate[RATE_NUM_SW] = {
  * @param[in] prIeExtSupportedRate       Pointer to the Ext Supported Rate IE
  * @param[out] pu2OperationalRateSet     Pointer to the Operational Rate Set
  * @param[out] pu2BSSBasicRateSet        Pointer to the Basic Rate Set
- * @param[out] pfgIsUnknownBSSBasicRate  Pointer to a Flag to indicate
- that
+ * @param[out] pfgIsUnknownBSSBasicRate  Pointer to a Flag to indicate that
  *                                       Basic Rate Set has unknown Rate Code
  *
  * \return (none)
  */
 /*----------------------------------------------------------------------------*/
 void
-rateGetRateSetFromIEs(
-		      IN struct IE_SUPPORTED_RATE_IOT *prIeSupportedRate,
+rateGetRateSetFromIEs(IN struct IE_SUPPORTED_RATE *prIeSupportedRate,
 		      IN struct IE_EXT_SUPPORTED_RATE *prIeExtSupportedRate,
 		      OUT uint16_t *pu2OperationalRateSet,
 		      OUT uint16_t *pu2BSSBasicRateSet,
@@ -189,7 +140,13 @@ rateGetRateSetFromIEs(
 	uint16_t u2BSSBasicRateSet = 0;
 	u_int8_t fgIsUnknownBSSBasicRate = FALSE;
 	uint8_t ucRate;
-	uint32_t i, j;
+	uint8_t ucTempLength;
+	uint8_t i;
+	uint32_t j;
+
+	ASSERT(pu2OperationalRateSet);
+	ASSERT(pu2BSSBasicRateSet);
+	ASSERT(pfgIsUnknownBSSBasicRate);
 
 	if (prIeSupportedRate) {
 		/* NOTE(Kevin): Buffalo WHR-G54S's supported rate set
@@ -200,15 +157,11 @@ rateGetRateSetFromIEs(
 		/* ASSERT(prIeSupportedRate->ucLength
 		 *  <= ELEM_MAX_LEN_SUP_RATES);
 		 */
-		ASSERT(prIeSupportedRate->ucLength <= RATE_NUM_SW);
+		ucTempLength =
+			(prIeSupportedRate->ucLength > ELEM_MAX_LEN_SUP_RATES) ?
+			ELEM_MAX_LEN_SUP_RATES : prIeSupportedRate->ucLength;
 
-		if (aucDebugModule[DBG_P2P_IDX] & DBG_CLASS_TRACE) {
-			DBGLOG(RLM, TRACE, "Dump supported rate\n");
-			dumpMemory8((uint8_t *) prIeSupportedRate,
-				(uint32_t) prIeSupportedRate->ucLength);
-		}
-
-		for (i = 0; i < prIeSupportedRate->ucLength; i++) {
+		for (i = 0; i < ucTempLength; i++) {
 			ucRate =
 			    prIeSupportedRate->aucSupportedRates[i] & RATE_MASK;
 
@@ -219,7 +172,7 @@ rateGetRateSetFromIEs(
 					u2OperationalRateSet |= BIT(j);
 
 					if (prIeSupportedRate->aucSupportedRates
-						[i] & RATE_BASIC_BIT)
+					    [i] & RATE_BASIC_BIT)
 						u2BSSBasicRateSet |= BIT(j);
 
 					break;
@@ -239,8 +192,12 @@ rateGetRateSetFromIEs(
 		/* ASSERT(prIeExtSupportedRate->ucLength
 		 *  <= ELEM_MAX_LEN_EXTENDED_SUP_RATES);
 		 */
+		ucTempLength = (prIeExtSupportedRate->ucLength >
+				ELEM_MAX_LEN_EXTENDED_SUP_RATES) ?
+				ELEM_MAX_LEN_EXTENDED_SUP_RATES :
+				prIeExtSupportedRate->ucLength;
 
-		for (i = 0; i < prIeExtSupportedRate->ucLength; i++) {
+		for (i = 0; i < ucTempLength; i++) {
 			ucRate =
 			    prIeExtSupportedRate->aucExtSupportedRates[i] &
 			    RATE_MASK;
@@ -273,11 +230,6 @@ rateGetRateSetFromIEs(
 	*pu2BSSBasicRateSet = u2BSSBasicRateSet;
 	*pfgIsUnknownBSSBasicRate = fgIsUnknownBSSBasicRate;
 
-	DBGLOG(RLM, TRACE, "OP rate:%d, Basic rate:%d, Unknown rate:%d\n",
-		u2OperationalRateSet,
-		u2BSSBasicRateSet,
-		fgIsUnknownBSSBasicRate);
-
 	return;
 
 }				/* end of rateGetRateSetFromIEs() */
@@ -302,6 +254,11 @@ rateGetDataRatesFromRateSet(IN uint16_t u2OperationalRateSet,
 			    OUT uint8_t *pucDataRatesLen)
 {
 	uint32_t i, j;
+
+	ASSERT(pucDataRates);
+	ASSERT(pucDataRatesLen);
+
+	ASSERT(u2BSSBasicRateSet == (u2OperationalRateSet & u2BSSBasicRateSet));
 
 	for (i = RATE_1M_SW_INDEX, j = 0; i < RATE_NUM_SW; i++) {
 		if (u2OperationalRateSet & BIT(i)) {
@@ -337,6 +294,8 @@ u_int8_t rateGetHighestRateIndexFromRateSet(IN uint16_t u2RateSet,
 {
 	int32_t i;
 
+	ASSERT(pucHighestRateIndex);
+
 	for (i = RATE_54M_SW_INDEX; i >= RATE_1M_SW_INDEX; i--) {
 		if (u2RateSet & BIT(i)) {
 			*pucHighestRateIndex = (uint8_t) i;
@@ -363,6 +322,8 @@ u_int8_t rateGetLowestRateIndexFromRateSet(IN uint16_t u2RateSet,
 					   OUT uint8_t *pucLowestRateIndex)
 {
 	uint32_t i;
+
+	ASSERT(pucLowestRateIndex);
 
 	for (i = RATE_1M_SW_INDEX; i <= RATE_54M_SW_INDEX; i++) {
 		if (u2RateSet & BIT(i)) {

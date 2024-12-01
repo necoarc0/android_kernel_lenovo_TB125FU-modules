@@ -1,54 +1,7 @@
-/******************************************************************************
- *
- * This file is provided under a dual license.  When you use or
- * distribute this software, you may choose to be licensed under
- * version 2 of the GNU General Public License ("GPLv2 License")
- * or BSD License.
- *
- * GPLv2 License
- *
- * Copyright(C) 2016 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * BSD LICENSE
- *
- * Copyright(C) 2016 MediaTek Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2016 MediaTek Inc.
+ */
 /*
  ** Id: //Department/DaVinci/BRANCHES/MT6620_WIFI_DRIVER_V2_3/nic/nic_tx.c#2
  */
@@ -72,7 +25,9 @@
  *******************************************************************************
  */
 #include "precomp.h"
+#if (CFG_SUPPORT_SNIFFER_RADIOTAP == 1)
 #include "radiotap.h"
+#endif
 
 /*******************************************************************************
  *                              C O N S T A N T S
@@ -180,30 +135,6 @@ uint8_t nic_rxd_v2_get_ofld(
 	return HAL_MAC_CONNAC2X_RX_STATUS_GET_OFLD(
 		(struct HW_MAC_CONNAC2X_RX_DESC *)prRxStatus);
 }
-
-static void updateLinkStatsMpduAc(struct ADAPTER *prAdapter,
-		struct SW_RFB *prSwRfb)
-{
-#if CFG_SUPPORT_LLS
-	static const uint8_t Tid2LinkStatsAc[] = {
-		STATS_LLS_WIFI_AC_BE,
-		STATS_LLS_WIFI_AC_BK,
-		STATS_LLS_WIFI_AC_BK,
-		STATS_LLS_WIFI_AC_BE,
-		STATS_LLS_WIFI_AC_VI,
-		STATS_LLS_WIFI_AC_VI,
-		STATS_LLS_WIFI_AC_VO,
-		STATS_LLS_WIFI_AC_VO,
-	};
-	uint8_t ac;
-
-	ac = Tid2LinkStatsAc[(uint8_t)(prSwRfb->ucTid & 0x7U)];
-	if (prSwRfb->ucPayloadFormat == RX_PAYLOAD_FORMAT_MSDU ||
-	    prSwRfb->ucPayloadFormat == RX_PAYLOAD_FORMAT_FIRST_SUB_AMSDU)
-		prAdapter->u4RxMpduAc[ac]++;
-#endif
-}
-
 /*----------------------------------------------------------------------------*/
 /*!
  * @brief Fill RFB
@@ -304,13 +235,16 @@ void nic_rxd_v2_fill_rfb(
 		HAL_MAC_CONNAC2X_RX_STATUS_IS_CLM_ERROR(prRxStatus);
 	prSwRfb->fgIsFrag = HAL_MAC_CONNAC2X_RX_STATUS_IS_FRAG(prRxStatus);
 	prSwRfb->fgIsFCS = HAL_MAC_CONNAC2X_RX_STATUS_IS_FCS_ERROR(prRxStatus);
+	prSwRfb->fgIsSecDone =
+		HAL_MAC_CONNAC2X_RX_STATUS_IS_SEC_DONE(prRxStatus);
 	prSwRfb->fgIsAmpdu = HAL_MAC_CONNAC2X_RX_STATUS_IS_NAMP(prRxStatus);
 	prSwRfb->ucRxvSeqNo =
 		HAL_MAC_CONNAC2X_RX_STATUS_GET_RXV_SEQ_NO(prRxStatus);
 	prSwRfb->ucChnlNum =
 		HAL_MAC_CONNAC2X_RX_STATUS_GET_CHNL_NUM(prRxStatus);
-
-	updateLinkStatsMpduAc(prAdapter, prSwRfb);
+	prSwRfb->ucKeyID = HAL_MAC_CONNAC2X_RX_STATUS_GET_KID(prRxStatus);
+	prSwRfb->ucHeaderOffset =
+		HAL_MAC_CONNAC2X_RX_STATUS_GET_HEADER_OFFSET(prRxStatus);
 
 #if 0
 	if (prHifRxHdr->ucReorder &
@@ -345,21 +279,6 @@ void nic_rxd_v2_fill_rfb(
 #endif
 }
 
-void nic_rxd_v2_parse_drop_pkt(struct SW_RFB *prSwRfb)
-{
-	uint16_t *pu2EtherType;
-
-	pu2EtherType = (uint16_t *)
-			((uint8_t *)prSwRfb->pvHeader +
-			2 * MAC_ADDR_LEN);
-	DBGLOG(RX, INFO,
-		"u2PacketLen:%d ucSecMode:%d ucWlanIdx:%d ucStaRecIdx:%d\n",
-		prSwRfb->u2PacketLen, prSwRfb->ucSecMode,
-		prSwRfb->ucWlanIdx, prSwRfb->ucStaRecIdx
-	);
-	STATS_RX_PKT_INFO_DISPLAY(prSwRfb);
-}
-
 u_int8_t nic_rxd_v2_sanity_check(
 	struct ADAPTER *prAdapter,
 	struct SW_RFB *prSwRfb)
@@ -367,31 +286,27 @@ u_int8_t nic_rxd_v2_sanity_check(
 	struct mt66xx_chip_info *prChipInfo;
 	struct HW_MAC_CONNAC2X_RX_DESC *prRxStatus;
 	u_int8_t fgDrop = FALSE;
-	uint8_t ucBssIndex;
-	struct RX_CTRL *prRxCtrl;
 
-	prRxCtrl = &prAdapter->rRxCtrl;
 	prChipInfo = prAdapter->chip_info;
 	prRxStatus = (struct HW_MAC_CONNAC2X_RX_DESC *)prSwRfb->prRxStatus;
-	ucBssIndex =
-		secGetBssIdxByWlanIdx(prAdapter,
-		HAL_MAC_CONNAC2X_RX_STATUS_GET_WLAN_IDX(prRxStatus));
 
 	if (!HAL_MAC_CONNAC2X_RX_STATUS_IS_FCS_ERROR(prRxStatus)
-	    && !HAL_MAC_CONNAC2X_RX_STATUS_IS_DAF(prRxStatus)
-	    && !HAL_MAC_CONNAC2X_RX_STATUS_IS_ICV_ERROR(prRxStatus)
-#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
-	    && !HAL_MAC_CONNAC2X_RX_STATUS_IS_TKIP_MIC_ERROR(prRxStatus)
-#endif /* CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION */
+#if CFG_SUPPORT_TKIP_MICERROR_DETECTION
+		&& !HAL_MAC_CONNAC2X_RX_STATUS_IS_TKIP_MIC_ERROR(prRxStatus)
+#endif /* CFG_SUPPORT_TKIP_MICERROR_DETECTION */
 	) {
-		if (!HAL_MAC_CONNAC2X_RX_STATUS_IS_NAMP(prRxStatus))
+		if (!HAL_MAC_CONNAC2X_RX_STATUS_IS_NAMP(prRxStatus)
+			&& !HAL_MAC_CONNAC2X_RX_STATUS_IS_DAF(prRxStatus))
 			prSwRfb->fgReorderBuffer = TRUE;
 		else if (HAL_MAC_CONNAC2X_RX_STATUS_IS_NDATA(prRxStatus))
 			prSwRfb->fgDataFrame = FALSE;
 		else if (HAL_MAC_CONNAC2X_RX_STATUS_IS_FRAG(prRxStatus))
 			prSwRfb->fgFragFrame = TRUE;
 	} else {
-		DBGLOG(RX, TEMP, "Sanity check to drop\n");
+		uint8_t ucBssIndex =
+			secGetBssIdxByWlanIdx(prAdapter,
+			HAL_MAC_CONNAC2X_RX_STATUS_GET_WLAN_IDX(prRxStatus));
+
 		fgDrop = TRUE;
 		if (!HAL_MAC_CONNAC2X_RX_STATUS_IS_ICV_ERROR(prRxStatus)
 		    && HAL_MAC_CONNAC2X_RX_STATUS_IS_TKIP_MIC_ERROR(
@@ -414,8 +329,6 @@ u_int8_t nic_rxd_v2_sanity_check(
 			 && !FEAT_SUP_LLC_VLAN_RX(prChipInfo)) {
 			uint16_t *pu2EtherType;
 
-			nicRxFillRFB(prAdapter, prSwRfb);
-
 			pu2EtherType = (uint16_t *)
 				((uint8_t *)prSwRfb->pvHeader +
 				2 * MAC_ADDR_LEN);
@@ -427,26 +340,32 @@ u_int8_t nic_rxd_v2_sanity_check(
 			    && *pu2EtherType == NTOHS(ETH_P_VLAN))
 				fgDrop = FALSE;
 
-#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
+#if CFG_SUPPORT_AMSDU_ATTACK_DETECTION
 			/*
 			 * let qmAmsduAttackDetection check this subframe
 			 * before drop it
 			 */
 			if (prSwRfb->ucPayloadFormat
 				== RX_PAYLOAD_FORMAT_FIRST_SUB_AMSDU) {
+				DBGLOG(RX, INFO, "LLC_MIS:%d\n",
+					HAL_MAC_CONNAC2X_RX_STATUS_IS_LLC_MIS(
+					prRxStatus));
 				fgDrop = FALSE;
-				prSwRfb->fgIsFirstSubAMSDULLCMS = TRUE;
 			}
-#endif /* CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION */
-		}
+#endif /* CFG_SUPPORT_AMSDU_ATTACK_DETECTION */
 
-		DBGLOG(RSN, TRACE, "Sanity check to drop:%d\n", fgDrop);
+		}
 	}
 
 	/* Drop plain text during security connection */
-	if (prSwRfb->fgIsCipherMS && prSwRfb->fgDataFrame == TRUE) {
+	if (HAL_MAC_CONNAC2X_RX_STATUS_IS_CIPHER_MISMATCH(prRxStatus)
+		&& (prSwRfb->fgDataFrame == TRUE)) {
 		uint16_t *pu2EtherType;
 
+		DBGLOG(RSN, INFO,
+			"HAL_MAC_CONNAC2X_RX_STATUS_IS_CIPHER_MISMATCH\n");
+
+		nicRxFillRFB(prAdapter, prSwRfb);
 		pu2EtherType = (uint16_t *)
 				((uint8_t *)prSwRfb->pvHeader +
 				2 * MAC_ADDR_LEN);
@@ -459,55 +378,32 @@ u_int8_t nic_rxd_v2_sanity_check(
 			fgDrop = FALSE;
 			DBGLOG(RSN, INFO,
 				"Don't drop eapol or wpi packet\n");
-#if CFG_SUPPORT_NAN
-		} else if ((ucBssIndex < MAX_BSSID_NUM)
-			&& (GET_BSS_INFO_BY_INDEX(prAdapter,
-			ucBssIndex)->eNetworkType == NETWORK_TYPE_NAN)
-			&& (prSwRfb->fgIsBC | prSwRfb->fgIsMC)) {
-			fgDrop = FALSE;
-			DBGLOG(RSN, INFO,
-				"Don't drop NAN MC pkt for sec\n");
-#endif
 		} else {
-			nic_rxd_v2_parse_drop_pkt(prSwRfb);
-
 			fgDrop = TRUE;
 			DBGLOG(RSN, INFO,
 				"Drop plain text during security connection\n");
 		}
+
 	}
 
-#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
+#if CFG_SUPPORT_FRAG_ATTACK_DETECTION
 	/* Drop fragmented broadcast and multicast frame */
-	if ((prSwRfb->fgIsBC | prSwRfb->fgIsMC)
-		&& (prSwRfb->fgFragFrame == TRUE)) {
+	if ((prSwRfb->fgIsBC | prSwRfb->fgIsMC) &&
+			(prSwRfb->fgFragFrame == TRUE)) {
 		fgDrop = TRUE;
 		DBGLOG(RSN, INFO,
 			"Drop fragmented broadcast and multicast\n");
 	}
+#endif /* CFG_SUPPORT_FRAG_ATTACK_DETECTION */
 
-	if (HAL_MAC_CONNAC2X_RX_STATUS_IS_DAF(prRxStatus))
-		DBGLOG(RSN, INFO, "De-amsdu fail, drop:%d\n", fgDrop);
-#endif /* CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION */
+	if (HAL_MAC_CONNAC2X_RX_STATUS_IS_DAF(prRxStatus)) {
+		fgDrop = TRUE;
+		DBGLOG(RSN, INFO, "de-amsdu fail, Drop:%d\n", fgDrop);
+	}
 
-	/* check CLS for MD */
-	if (HAL_MAC_CONNAC2X_RX_STATUS_GET_DW5_CLS_BITMAP_OFFSET(prRxStatus))
-		DBGLOG(RX, WARN, "RX DW5[0x%08x]\n", prRxStatus->u4DW5);
-
-	if (fgDrop) {
-		if (HAL_MAC_CONNAC2X_RX_STATUS_IS_FCS_ERROR(prRxStatus))
-			RX_INC_CNT(prRxCtrl, RX_FCS_ERR_DROP_COUNT);
-
-		if (HAL_MAC_CONNAC2X_RX_STATUS_IS_DAF(prRxStatus))
-			RX_INC_CNT(prRxCtrl, RX_DAF_ERR_DROP_COUNT);
-
-		if (HAL_MAC_CONNAC2X_RX_STATUS_IS_ICV_ERROR(prRxStatus))
-			RX_INC_CNT(prRxCtrl, RX_ICV_ERR_DROP_COUNT);
-
-#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
-		if (HAL_MAC_CONNAC2X_RX_STATUS_IS_TKIP_MIC_ERROR(prRxStatus))
-			RX_INC_CNT(prRxCtrl, RX_TKIP_MIC_ERROR_DROP_COUNT);
-#endif /* CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION */
+	if (HAL_MAC_CONNAC2X_RX_STATUS_IS_ICV_ERROR(prRxStatus)) {
+		fgDrop = TRUE;
+		DBGLOG(RSN, INFO, "Drop icv error\n");
 	}
 
 	return fgDrop;
@@ -550,91 +446,9 @@ void nic_rxd_v2_check_wakeup_reason(
 		(uint8_t) HAL_MAC_CONNAC2X_RX_STATUS_GET_GROUP_VLD(prRxStatus);
 
 	switch (prSwRfb->ucPacketType) {
-	case RX_PKT_TYPE_SW_DEFINED:
-	if (prSwRfb->ucOFLD || prSwRfb->fgHdrTran) {
-		DBGLOG(RX, INFO, "Need to treat as data frame.\n");
-		/*
-		 * In order to jump to case RX_PKT_TYPE_RX_DATA,
-		 * DO NOT ADD break here!!!
-		 */
-	} else {
-	/* HIF_RX_PKT_TYPE_EVENT */
-		if ((NIC_RX_GET_U2_SW_PKT_TYPE(prSwRfb->prRxStatus) &
-			CONNAC2X_RX_STATUS_PKT_TYPE_SW_BITMAP) ==
-			CONNAC2X_RX_STATUS_PKT_TYPE_SW_EVENT) {
-			prEvent = (struct WIFI_EVENT *)
-				(prSwRfb->pucRecvBuff + prChipInfo->rxd_size);
-			/* fos_change begin */
-#if CFG_SUPPORT_WAKEUP_STATISTICS
-			nicUpdateWakeupStatistics(prAdapter, RX_EVENT_INT);
-			prAdapter->wake_event_count[prEvent->ucEID]++;
-#endif
-			DBGLOG(RX, INFO, "Event 0x%02x wakeup host\n",
-				prEvent->ucEID);
-			break;
-		} else if ((NIC_RX_GET_U2_SW_PKT_TYPE(prSwRfb->prRxStatus) &
-			CONNAC2X_RX_STATUS_PKT_TYPE_SW_BITMAP) ==
-			CONNAC2X_RX_STATUS_PKT_TYPE_SW_FRAME) {
-			/* case HIF_RX_PKT_TYPE_MANAGEMENT: */
-			uint8_t ucSubtype;
-			struct WLAN_MAC_MGMT_HEADER *prWlanMgmtHeader;
-			uint16_t u2Temp = prChipInfo->rxd_size;
-/* fos_change begin */
-#if CFG_SUPPORT_WAKEUP_STATISTICS
-			nicUpdateWakeupStatistics(prAdapter, RX_MGMT_INT);
-#endif /* fos_change end */
-
-
-			u2PktLen =
-				HAL_MAC_CONNAC2X_RX_STATUS_GET_RX_BYTE_CNT(
-				prRxStatus);
-
-			u4HeaderOffset = (uint32_t)
-				HAL_MAC_CONNAC2X_RX_STATUS_GET_HEADER_OFFSET(
-				prRxStatus);
-			if (prSwRfb->ucGroupVLD & BIT(RX_GROUP_VLD_4))
-				u2Temp += sizeof(struct HW_MAC_RX_STS_GROUP_4);
-			if (prSwRfb->ucGroupVLD & BIT(RX_GROUP_VLD_1))
-				u2Temp += sizeof(struct HW_MAC_RX_STS_GROUP_1);
-			if (prSwRfb->ucGroupVLD & BIT(RX_GROUP_VLD_2))
-				u2Temp += sizeof(struct HW_MAC_RX_STS_GROUP_2);
-			if (prSwRfb->ucGroupVLD & BIT(RX_GROUP_VLD_3))
-				u2Temp +=
-			    sizeof(struct HW_MAC_RX_STS_GROUP_3_V2);
-			pvHeader = (uint8_t *)
-				prRxStatus + u2Temp + u4HeaderOffset;
-				u2PktLen -= u2Temp + u4HeaderOffset;
-			if (!pvHeader) {
-				DBGLOG(RX, ERROR,
-				"Frame but pvHeader is NULL!\n");
-				break;
-			}
-			prWlanMgmtHeader =
-			(struct WLAN_MAC_MGMT_HEADER *)pvHeader;
-			ucSubtype = (prWlanMgmtHeader->u2FrameCtrl &
-				MASK_FC_SUBTYPE) >> OFFSET_OF_FC_SUBTYPE;
-
-			DBGLOG(RX, INFO,
-				" frame subtype:%d, SeqCtrl %d wakeup host\n",
-				ucSubtype, prWlanMgmtHeader->u2SeqCtrl);
-			DBGLOG_MEM8(RX, INFO,
-					pvHeader, u2PktLen > 50 ? 50:u2PktLen);
-		} else {
-			DBGLOG(RX, ERROR,
-			"[%s]: u2PktTYpe(0x%04X) is OUT OF DEF.!!!\n",
-			__func__,
-			NIC_RX_GET_U2_SW_PKT_TYPE(prSwRfb->prRxStatus));
-			ASSERT(0);
-		}
-		break;
-	}
 	case RX_PKT_TYPE_RX_DATA:
 	{
 		uint16_t u2Temp = 0;
-/* fos_change begin */
-#if CFG_SUPPORT_WAKEUP_STATISTICS
-		nicUpdateWakeupStatistics(prAdapter, RX_DATA_INT);
-#endif /* fos_change end */
 
 		u2PktLen =
 			HAL_MAC_CONNAC2X_RX_STATUS_GET_RX_BYTE_CNT(prRxStatus);
@@ -650,6 +464,8 @@ void nic_rxd_v2_check_wakeup_reason(
 			u2Temp += sizeof(struct HW_MAC_RX_STS_GROUP_2);
 		if (prSwRfb->ucGroupVLD & BIT(RX_GROUP_VLD_3))
 			u2Temp += sizeof(struct HW_MAC_RX_STS_GROUP_3_V2);
+		if (prSwRfb->ucGroupVLD & BIT(RX_GROUP_VLD_5))
+			u2Temp += sizeof(struct HW_MAC_RX_STS_GROUP_5);
 		pvHeader = (uint8_t *)prRxStatus + u2Temp + u4HeaderOffset;
 		u2PktLen -= u2Temp + u4HeaderOffset;
 		if (!pvHeader) {
@@ -702,30 +518,81 @@ void nic_rxd_v2_check_wakeup_reason(
 				u2Temp);
 			break;
 		default:
-			if (HAL_MAC_CONNAC2X_RX_STATUS_IS_LLC_MIS(prRxStatus)) {
-				DBGLOG(RX, WARN,
-					"abnormal packet, Header translate fail\n");
-				DBGLOG_MEM8(RX, INFO,
-					(uint8_t *)prSwRfb->prRxStatus,
-					prChipInfo->rxd_size);
-				DBGLOG_MEM8(RX, INFO, pvHeader, u2PktLen);
-			} else {
-				DBGLOG(RX, WARN,
-					"abnormal packet, EthType 0x%04x wakeup host\n",
-					u2Temp);
-				DBGLOG_MEM8(RX, INFO,
-					pvHeader, u2PktLen > 50 ? 50:u2PktLen);
-			}
+			DBGLOG(RX, WARN,
+				"abnormal packet, EthType 0x%04x wakeup host\n",
+				u2Temp);
+			DBGLOG_MEM8(RX, INFO,
+				pvHeader, u2PktLen > 50 ? 50:u2PktLen);
 			break;
 		}
 		break;
 	}
+	case RX_PKT_TYPE_SW_DEFINED:
+		/* HIF_RX_PKT_TYPE_EVENT */
+		if ((NIC_RX_GET_U2_SW_PKT_TYPE(prSwRfb->prRxStatus) &
+			CONNAC2X_RX_STATUS_PKT_TYPE_SW_BITMAP) ==
+			CONNAC2X_RX_STATUS_PKT_TYPE_SW_EVENT) {
 
+			prEvent = (struct WIFI_EVENT *)
+				(prSwRfb->pucRecvBuff + prChipInfo->rxd_size);
+
+			DBGLOG(RX, INFO, "Event 0x%02x wakeup host\n",
+				prEvent->ucEID);
+			break;
+
+		} else if ((NIC_RX_GET_U2_SW_PKT_TYPE(prSwRfb->prRxStatus) &
+			CONNAC2X_RX_STATUS_PKT_TYPE_SW_BITMAP) ==
+			CONNAC2X_RX_STATUS_PKT_TYPE_SW_FRAME) {
+			/* case HIF_RX_PKT_TYPE_MANAGEMENT: */
+			uint8_t ucSubtype;
+			struct WLAN_MAC_MGMT_HEADER *prWlanMgmtHeader;
+			uint16_t u2Temp = prChipInfo->rxd_size;
+			u2PktLen =
+			HAL_MAC_CONNAC2X_RX_STATUS_GET_RX_BYTE_CNT(prRxStatus);
+
+			u4HeaderOffset = (uint32_t)
+				HAL_MAC_CONNAC2X_RX_STATUS_GET_HEADER_OFFSET(
+					prRxStatus);
+			if (prSwRfb->ucGroupVLD & BIT(RX_GROUP_VLD_4))
+				u2Temp += sizeof(struct HW_MAC_RX_STS_GROUP_4);
+			if (prSwRfb->ucGroupVLD & BIT(RX_GROUP_VLD_1))
+				u2Temp += sizeof(struct HW_MAC_RX_STS_GROUP_1);
+			if (prSwRfb->ucGroupVLD & BIT(RX_GROUP_VLD_2))
+				u2Temp += sizeof(struct HW_MAC_RX_STS_GROUP_2);
+			if (prSwRfb->ucGroupVLD & BIT(RX_GROUP_VLD_3))
+				u2Temp +=
+			    sizeof(struct HW_MAC_RX_STS_GROUP_3_V2);
+			if (prSwRfb->ucGroupVLD & BIT(RX_GROUP_VLD_5))
+				u2Temp += sizeof(struct HW_MAC_RX_STS_GROUP_5);
+			pvHeader = (uint8_t *)
+				prRxStatus + u2Temp + u4HeaderOffset;
+			u2PktLen -= u2Temp + u4HeaderOffset;
+			if (!pvHeader) {
+				DBGLOG(RX, ERROR,
+					"Frame but pvHeader is NULL!\n");
+				break;
+			}
+			prWlanMgmtHeader =
+				(struct WLAN_MAC_MGMT_HEADER *)pvHeader;
+			ucSubtype = (prWlanMgmtHeader->u2FrameCtrl &
+				MASK_FC_SUBTYPE) >> OFFSET_OF_FC_SUBTYPE;
+			DBGLOG(RX, INFO,
+				"frame subtype: %d",
+				ucSubtype);
+			DBGLOG(RX, INFO,
+				" SeqCtrl %d wakeup host\n",
+				prWlanMgmtHeader->u2SeqCtrl);
+			DBGLOG_MEM8(RX, INFO,
+				pvHeader, u2PktLen > 50 ? 50:u2PktLen);
+		} else {
+			DBGLOG(RX, ERROR,
+				"[%s]: u2PktTYpe(0x%04X) is OUT OF DEF.!!!\n",
+				__func__,
+				NIC_RX_GET_U2_SW_PKT_TYPE(prSwRfb->prRxStatus));
+			ASSERT(0);
+		}
+		break;
 	default:
-/* fos_change begin */
-#if CFG_SUPPORT_WAKEUP_STATISTICS
-		nicUpdateWakeupStatistics(prAdapter, RX_OTHERS_INT);
-#endif
 		DBGLOG(RX, WARN, "Unknown Packet %d wakeup host\n",
 			prSwRfb->ucPacketType);
 		break;
@@ -733,12 +600,12 @@ void nic_rxd_v2_check_wakeup_reason(
 }
 #endif /* CFG_SUPPORT_WAKEUP_REASON_DEBUG */
 
-#ifdef CFG_SUPPORT_SNIFFER_RADIOTAP
+#if (CFG_SUPPORT_SNIFFER_RADIOTAP == 1)
 uint8_t nic_rxd_v2_fill_radiotap(
 	struct ADAPTER *prAdapter,
 	struct SW_RFB *prSwRfb)
 {
-	struct RX_CTRL *prRxCtrl = &prAdapter->rRxCtrl;
+	struct GLUE_INFO *prGlueInfo = prAdapter->prGlueInfo;
 	struct mt66xx_chip_info *prChipInfo;
 	struct HW_MAC_CONNAC2X_RX_DESC *prRxStatus;
 	struct HW_MAC_RX_STS_GROUP_2 *prRxStatusGroup2 = NULL;
@@ -749,37 +616,28 @@ uint8_t nic_rxd_v2_fill_radiotap(
 	uint32_t u4HeaderOffset;
 
 	prChipInfo = prAdapter->chip_info;
-	prRxStatus = (struct HW_MAC_CONNAC2X_RX_DESC *)
-			prSwRfb->prRxStatus;
+	prRxStatus = (struct HW_MAC_CONNAC2X_RX_DESC *)prSwRfb->prRxStatus;
 	u2RxStatusOffset = prChipInfo->rxd_size;
 	prSwRfb->ucGroupVLD =
-		(uint8_t) HAL_MAC_CONNAC2X_RX_STATUS_GET_GROUP_VLD(
-				prRxStatus);
+		(uint8_t) HAL_MAC_CONNAC2X_RX_STATUS_GET_GROUP_VLD(prRxStatus);
 
-	if (prSwRfb->ucGroupVLD & BIT(RX_GROUP_VLD_4)) {
-		u2RxStatusOffset +=
-			sizeof(struct HW_MAC_RX_STS_GROUP_4);
-	}
+	if (prSwRfb->ucGroupVLD & BIT(RX_GROUP_VLD_4))
+		u2RxStatusOffset += sizeof(struct HW_MAC_RX_STS_GROUP_4);
 
-	if (prSwRfb->ucGroupVLD & BIT(RX_GROUP_VLD_1)) {
-		u2RxStatusOffset +=
-			sizeof(struct HW_MAC_RX_STS_GROUP_1);
-	}
+	if (prSwRfb->ucGroupVLD & BIT(RX_GROUP_VLD_1))
+		u2RxStatusOffset += sizeof(struct HW_MAC_RX_STS_GROUP_1);
 
 	if (prSwRfb->ucGroupVLD & BIT(RX_GROUP_VLD_2)) {
 		prRxStatusGroup2 = (struct HW_MAC_RX_STS_GROUP_2 *)
 			((uint8_t *) prRxStatus + u2RxStatusOffset);
-		u2RxStatusOffset +=
-			sizeof(struct HW_MAC_RX_STS_GROUP_2);
+		u2RxStatusOffset += sizeof(struct HW_MAC_RX_STS_GROUP_2);
 
 	}
 
 	if (prSwRfb->ucGroupVLD & BIT(RX_GROUP_VLD_3)) {
-		prRxStatusGroup3 =
-			(struct HW_MAC_RX_STS_GROUP_3_V2 *)
+		prRxStatusGroup3 = (struct HW_MAC_RX_STS_GROUP_3_V2 *)
 			((uint8_t *) prRxStatus + u2RxStatusOffset);
-		u2RxStatusOffset +=
-			sizeof(struct HW_MAC_RX_STS_GROUP_3_V2);
+		u2RxStatusOffset += sizeof(struct HW_MAC_RX_STS_GROUP_3_V2);
 	}
 
 	if (prSwRfb->ucGroupVLD & BIT(RX_GROUP_VLD_5)) {
@@ -793,24 +651,20 @@ uint8_t nic_rxd_v2_fill_radiotap(
 		prRxStatusGroup5 == NULL)
 		return FALSE;
 
-	prSwRfb->u2RxByteCount = (uint16_t)
-		HAL_MAC_CONNAC2X_RX_STATUS_GET_RX_BYTE_CNT(
-			prRxStatus);
+	prSwRfb->u2RxByteCount =
+	    (uint16_t) HAL_MAC_CONNAC2X_RX_STATUS_GET_RX_BYTE_CNT(prRxStatus);
 
-	if (HAL_MAC_CONNAC2X_RX_STATUS_GET_RXV_SEQ_NO(
-		prRxStatus) != 0)
-		RX_INC_CNT(prRxCtrl, RX_SNIFFER_LOG_COUNT);
+	if (HAL_MAC_CONNAC2X_RX_STATUS_GET_RXV_SEQ_NO(prRxStatus) != 0)
+		prGlueInfo->u4AmpduRefNum += 1;
 
 	u4HeaderOffset = (uint32_t) (
-		HAL_MAC_CONNAC2X_RX_STATUS_GET_HEADER_OFFSET(
-			prRxStatus));
+		HAL_MAC_CONNAC2X_RX_STATUS_GET_HEADER_OFFSET(prRxStatus));
 	u2RxStatusOffset += u4HeaderOffset;
 
 	prRadiotapInfo = prSwRfb->prRadiotapInfo;
 	prRadiotapInfo->u2VendorLen = u2RxStatusOffset;
 	prRadiotapInfo->ucSubNamespace = 2;
-	prRadiotapInfo->u4AmpduRefNum = RX_GET_CNT(prRxCtrl,
-					RX_SNIFFER_LOG_COUNT);
+	prRadiotapInfo->u4AmpduRefNum = prGlueInfo->u4AmpduRefNum;
 	prRadiotapInfo->u4Timestamp = prRxStatusGroup2->u4Timestamp;
 	prRadiotapInfo->ucFcsErr =
 		HAL_MAC_CONNAC2X_RX_STATUS_IS_FCS_ERROR(prRxStatus);
@@ -821,101 +675,72 @@ uint8_t nic_rxd_v2_fill_radiotap(
 	prRadiotapInfo->ucRfBand =
 		HAL_MAC_CONNAC2X_RX_STATUS_GET_RF_BAND(prRxStatus);
 	prRadiotapInfo->ucTxMode =
-		HAL_MAC_CONNAC2X_RX_VT_GET_RX_MODE(
-			prRxStatusGroup5);
+		HAL_MAC_CONNAC2X_RX_VT_GET_RX_MODE(prRxStatusGroup5);
 	prRadiotapInfo->ucFrMode =
-		HAL_MAC_CONNAC2X_RX_VT_GET_FR_MODE(
-			prRxStatusGroup5);
+		HAL_MAC_CONNAC2X_RX_VT_GET_FR_MODE(prRxStatusGroup5);
 	prRadiotapInfo->ucShortGI =
-		HAL_MAC_CONNAC2X_RX_VT_GET_SHORT_GI(
-			prRxStatusGroup5);
+		HAL_MAC_CONNAC2X_RX_VT_GET_SHORT_GI(prRxStatusGroup5);
 	prRadiotapInfo->ucSTBC =
-		HAL_MAC_CONNAC2X_RX_VT_GET_STBC(
-			prRxStatusGroup5);
-	prRadiotapInfo->ucNess = HAL_MAC_CONNAC2X_RX_VT_GET_NESS(
-			prRxStatusGroup5);
-	prRadiotapInfo->ucLDPC = HAL_MAC_CONNAC2X_RX_VT_GET_LDPC(
-			prRxStatusGroup3);
-	prRadiotapInfo->ucMcs = HAL_MAC_CONNAC2X_RX_VT_GET_RX_RATE(
-			prRxStatusGroup3);
-	prRadiotapInfo->ucRcpi0 = HAL_MAC_CONNAC2X_RX_VT_GET_RCPI0(
-			prRxStatusGroup5);
+		HAL_MAC_CONNAC2X_RX_VT_GET_STBC(prRxStatusGroup5);
+	prRadiotapInfo->ucNess =
+		HAL_MAC_CONNAC2X_RX_VT_GET_NESS(prRxStatusGroup5);
+	prRadiotapInfo->ucLDPC =
+		HAL_MAC_CONNAC2X_RX_VT_GET_LDPC(prRxStatusGroup3);
+	prRadiotapInfo->ucMcs =
+		HAL_MAC_CONNAC2X_RX_VT_GET_RX_RATE(prRxStatusGroup3);
+	prRadiotapInfo->ucRcpi0 =
+		HAL_MAC_CONNAC2X_RX_VT_GET_RCPI0(prRxStatusGroup5);
 	prRadiotapInfo->ucTxopPsNotAllow =
-		HAL_MAC_CONNAC2X_RX_VT_TXOP_PS_NOT_ALLOWED(
-			prRxStatusGroup5);
+		HAL_MAC_CONNAC2X_RX_VT_TXOP_PS_NOT_ALLOWED(prRxStatusGroup5);
 	prRadiotapInfo->ucLdpcExtraOfdmSym =
-		HAL_MAC_CONNAC2X_RX_VT_LDPC_EXTRA_OFDM_SYM(
-			prRxStatusGroup5);
+		HAL_MAC_CONNAC2X_RX_VT_LDPC_EXTRA_OFDM_SYM(prRxStatusGroup5);
 	prRadiotapInfo->ucVhtGroupId =
-		HAL_MAC_CONNAC2X_RX_VT_GET_GROUP_ID(
-			prRxStatusGroup5);
+		HAL_MAC_CONNAC2X_RX_VT_GET_GROUP_ID(prRxStatusGroup5);
 	prRadiotapInfo->ucNsts =
-		HAL_MAC_CONNAC2X_RX_VT_GET_NSTS(
-			prRxStatusGroup3) + 1;
+		HAL_MAC_CONNAC2X_RX_VT_GET_NSTS(prRxStatusGroup3) + 1;
 	prRadiotapInfo->ucBeamFormed =
-		HAL_MAC_CONNAC2X_RX_VT_GET_BEAMFORMED(
-			prRxStatusGroup3);
+		HAL_MAC_CONNAC2X_RX_VT_GET_BEAMFORMED(prRxStatusGroup3);
 
 	if (prRadiotapInfo->ucTxMode & TX_RATE_MODE_HE_SU) {
 		prRadiotapInfo->ucPeDisamb =
-			HAL_MAC_CONNAC2X_RX_VT_GET_PE_DIS_AMB(
-				prRxStatusGroup5);
+			HAL_MAC_CONNAC2X_RX_VT_GET_PE_DIS_AMB(prRxStatusGroup5);
 		prRadiotapInfo->ucNumUser =
-			HAL_MAC_CONNAC2X_RX_VT_GET_NUM_USER(
-				prRxStatusGroup5);
+			HAL_MAC_CONNAC2X_RX_VT_GET_NUM_USER(prRxStatusGroup5);
 		prRadiotapInfo->ucSigBRU0 =
-			HAL_MAC_CONNAC2X_RX_VT_GET_SIGB_RU0(
-				prRxStatusGroup5);
+			HAL_MAC_CONNAC2X_RX_VT_GET_SIGB_RU0(prRxStatusGroup5);
 		prRadiotapInfo->ucSigBRU1 =
-			HAL_MAC_CONNAC2X_RX_VT_GET_SIGB_RU1(
-				prRxStatusGroup5);
+			HAL_MAC_CONNAC2X_RX_VT_GET_SIGB_RU1(prRxStatusGroup5);
 		prRadiotapInfo->ucSigBRU2 =
-			HAL_MAC_CONNAC2X_RX_VT_GET_SIGB_RU2(
-				prRxStatusGroup5);
+			HAL_MAC_CONNAC2X_RX_VT_GET_SIGB_RU2(prRxStatusGroup5);
 		prRadiotapInfo->ucSigBRU3 =
-			HAL_MAC_CONNAC2X_RX_VT_GET_SIGB_RU3(
-				prRxStatusGroup5);
+			HAL_MAC_CONNAC2X_RX_VT_GET_SIGB_RU3(prRxStatusGroup5);
 		prRadiotapInfo->u2VhtPartialAid =
-			HAL_MAC_CONNAC2X_RX_VT_GET_PART_AID(
-				prRxStatusGroup5);
+			HAL_MAC_CONNAC2X_RX_VT_GET_PART_AID(prRxStatusGroup5);
 		prRadiotapInfo->u2RuAllocation =
-			((HAL_MAC_CONNAC2X_RX_VT_GET_RU_ALLOC1(
-				prRxStatusGroup3) >> 1) |
-			 (HAL_MAC_CONNAC2X_RX_VT_GET_RU_ALLOC2(
-				prRxStatusGroup3) << 3));
+		((HAL_MAC_CONNAC2X_RX_VT_GET_RU_ALLOC1(prRxStatusGroup3) >> 1) |
+		(HAL_MAC_CONNAC2X_RX_VT_GET_RU_ALLOC2(prRxStatusGroup3) << 3));
 		prRadiotapInfo->u2BssClr =
-			HAL_MAC_CONNAC2X_RX_VT_GET_BSS_COLOR(
-				prRxStatusGroup5);
+			HAL_MAC_CONNAC2X_RX_VT_GET_BSS_COLOR(prRxStatusGroup5);
 		prRadiotapInfo->u2BeamChange =
-			HAL_MAC_CONNAC2X_RX_VT_GET_BEAM_CHANGE(
-				prRxStatusGroup5);
+		    HAL_MAC_CONNAC2X_RX_VT_GET_BEAM_CHANGE(prRxStatusGroup5);
 		prRadiotapInfo->u2UlDl =
-			HAL_MAC_CONNAC2X_RX_VT_GET_UL_DL(
-				prRxStatusGroup5);
+			HAL_MAC_CONNAC2X_RX_VT_GET_UL_DL(prRxStatusGroup5);
 		prRadiotapInfo->u2DataDcm =
-			HAL_MAC_CONNAC2X_RX_VT_GET_DCM(
-				prRxStatusGroup5);
+			HAL_MAC_CONNAC2X_RX_VT_GET_DCM(prRxStatusGroup5);
 		prRadiotapInfo->u2SpatialReuse1 =
-			HAL_MAC_CONNAC2X_RX_VT_GET_SPATIAL_REUSE1(
-				prRxStatusGroup5);
+		    HAL_MAC_CONNAC2X_RX_VT_GET_SPATIAL_REUSE1(prRxStatusGroup5);
 		prRadiotapInfo->u2SpatialReuse2 =
-			HAL_MAC_CONNAC2X_RX_VT_GET_SPATIAL_REUSE2(
-				prRxStatusGroup5);
+		    HAL_MAC_CONNAC2X_RX_VT_GET_SPATIAL_REUSE2(prRxStatusGroup5);
 		prRadiotapInfo->u2SpatialReuse3 =
-			HAL_MAC_CONNAC2X_RX_VT_GET_SPATIAL_REUSE3(
-				prRxStatusGroup5);
+		    HAL_MAC_CONNAC2X_RX_VT_GET_SPATIAL_REUSE3(prRxStatusGroup5);
 		prRadiotapInfo->u2SpatialReuse4 =
-			HAL_MAC_CONNAC2X_RX_VT_GET_SPATIAL_REUSE4(
-				prRxStatusGroup5);
+		    HAL_MAC_CONNAC2X_RX_VT_GET_SPATIAL_REUSE4(prRxStatusGroup5);
 		prRadiotapInfo->u2Ltf =
-			HAL_MAC_CONNAC2X_RX_VT_GET_LTF(
-				prRxStatusGroup5) + 1;
+			HAL_MAC_CONNAC2X_RX_VT_GET_LTF(prRxStatusGroup5) + 1;
 		prRadiotapInfo->u2Doppler =
-			HAL_MAC_CONNAC2X_RX_VT_GET_DOPPLER(
-				prRxStatusGroup5);
+			HAL_MAC_CONNAC2X_RX_VT_GET_DOPPLER(prRxStatusGroup5);
 		prRadiotapInfo->u2Txop =
-			HAL_MAC_CONNAC2X_RX_VT_GET_TXOP(
-				prRxStatusGroup5);
+			HAL_MAC_CONNAC2X_RX_VT_GET_TXOP(prRxStatusGroup5);
 	}
 
 	return TRUE;

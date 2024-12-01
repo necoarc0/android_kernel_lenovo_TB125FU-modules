@@ -568,3 +568,4 @@ P_REG_MAP_ADDR mtk_wcn_consys_get_debug_reg_ary(VOID);
 
 struct platform_device *get_consys_device(void);
 #endif /* _MTK_WCN_CONSYS_HW_H_ */
+

@@ -149,3 +149,4 @@ enum GDL_RET_STATUS gdl_dma_buf_entry_transfer_left_to_write_index(
 	unsigned int left_len, unsigned int *p_write_index);
 
 #endif /* _GPS_DL_DMA_BUF_H */
+

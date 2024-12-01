@@ -148,3 +148,4 @@ void _ring_emi_write_commit(struct ring_emi_segment *seg, struct ring_emi *ring_
 	/* ring_emi_dump(__func__, ring_emi); */
 	/* ring_emi_dump_segment(__func__, seg); */
 }
+

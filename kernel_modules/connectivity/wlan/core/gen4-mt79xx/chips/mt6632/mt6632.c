@@ -1,54 +1,7 @@
-/******************************************************************************
- *
- * This file is provided under a dual license.  When you use or
- * distribute this software, you may choose to be licensed under
- * version 2 of the GNU General Public License ("GPLv2 License")
- * or BSD License.
- *
- * GPLv2 License
- *
- * Copyright(C) 2016 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * BSD LICENSE
- *
- * Copyright(C) 2016 MediaTek Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2016 MediaTek Inc.
+ */
 /*! \file   mt6632.c
  *    \brief  Internal driver stack will export the required procedures here
  *            for GLUE Layer.
@@ -162,13 +115,8 @@ void mt6632CapInit(IN struct ADAPTER *prAdapter)
 	switch (prGlueInfo->u4InfType) {
 #if defined(_HIF_PCIE)
 	case MT_DEV_INF_PCIE:
-#if CFG_TRI_TX_RING
-		prChipInfo->u2TxInitCmdPort = TX_RING_FWDL_IDX_5;
-		prChipInfo->u2TxFwDlPort = TX_RING_FWDL_IDX_5;
-#else
-		prChipInfo->u2TxInitCmdPort = TX_RING_FWDL_IDX_4;
-		prChipInfo->u2TxFwDlPort = TX_RING_FWDL_IDX_4;
-#endif
+		prChipInfo->u2TxInitCmdPort = TX_RING_FWDL_IDX_3;
+		prChipInfo->u2TxFwDlPort = TX_RING_FWDL_IDX_3;
 		break;
 #endif /* _HIF_PCIE */
 #if defined(_HIF_USB)
@@ -223,8 +171,7 @@ uint32_t mt6632GetFwDlInfo(struct ADAPTER *prAdapter,
 
 #if defined(_HIF_PCIE)
 
-void mt6632PdmaConfig(struct GLUE_INFO *prGlueInfo, u_int8_t enable,
-		bool fgResetHif)
+void mt6632PdmaConfig(struct GLUE_INFO *prGlueInfo, u_int8_t enable)
 {
 	struct BUS_INFO *prBusInfo = prGlueInfo->prAdapter->chip_info->bus_info;
 	union WPDMA_GLO_CFG_STRUCT GloCfg;
@@ -372,6 +319,8 @@ struct BUS_INFO mt6632_bus_info = {
 	.u4DmaMask = 32,
 
 	.pdmaSetup = mt6632PdmaConfig,
+	.pdmaStop = NULL,
+	.pdmaPollingIdle = NULL,
 	.updateTxRingMaxQuota = NULL,
 	.enableInterrupt = mt6632EnableInterrupt,
 	.disableInterrupt = mt6632DisableInterrupt,
@@ -388,6 +337,7 @@ struct BUS_INFO mt6632_bus_info = {
 	.hifRst = NULL,
 	.initPcieInt = NULL,
 	.DmaShdlInit = NULL,
+	.DmaShdlReInit = NULL,
 #endif /* _HIF_PCIE */
 #if defined(_HIF_USB)
 	.u4UdmaWlCfg_0_Addr = UDMA_WLCFG_0,
@@ -397,11 +347,17 @@ struct BUS_INFO mt6632_bus_info = {
 		UDMA_WLCFG_0_RX_MPSZ_PAD0(1)),
 	.u4device_vender_request_in = DEVICE_VENDOR_REQUEST_IN,
 	.u4device_vender_request_out = DEVICE_VENDOR_REQUEST_OUT,
+	.fgIsSupportWdtEp = FALSE,
 	.asicUsbSuspend = NULL,
 	.asicUsbResume = NULL,
 	.asicUsbEventEpDetected = NULL,
 	.asicUsbRxByteCount = NULL,
 	.DmaShdlInit = NULL,
+	.DmaShdlReInit = NULL,
+	.asicUdmaRxFlush = NULL,
+#if CFG_CHIP_RESET_SUPPORT
+	.asicUsbEpctlRstOpt = NULL,
+#endif
 #endif /* _HIF_USB */
 #if defined(_HIF_SDIO)
 	.halTxGetFreeResource = NULL,
@@ -418,7 +374,6 @@ struct FWDL_OPS_T mt6632_fw_dl_ops = {
 	.downloadByDynMemMap = NULL,
 	.getFwInfo = wlanGetHarvardFwInfo,
 	.getFwDlInfo = mt6632GetFwDlInfo,
-	.phyAction = NULL,
 };
 
 struct TX_DESC_OPS_T mt6632TxDescOps = {
@@ -434,8 +389,14 @@ struct RX_DESC_OPS_T mt6632RxDescOps = {
 struct ATE_OPS_T mt6632AteOps = {
 	.setICapStart = mt6632SetICapStart,
 	.getICapStatus = mt6632GetICapStatus,
-	.getICapIQData = NULL,
-	.getRbistDataDumpEvent = NULL,
+	.getICapIQData = commonGetICapIQData,
+	.getRbistDataDumpEvent = nicExtEventQueryMemDump,
+	.u4EnBitWidth = 1, /*96 bit*/
+	.u4Architech = 0,  /*0:on-chip*/
+	.u4PhyIdx = 0,
+	.u4EmiStartAddress = 0,
+	.u4EmiEndAddress = 0,
+	.u4EmiMsbAddress = 0,
 };
 #endif
 
@@ -446,11 +407,16 @@ struct CHIP_DBG_OPS mt6632_debug_ops = {
 	.showTxdInfo = NULL,
 	.showCsrInfo = NULL,
 	.showDmaschInfo = NULL,
-	.dumpMacInfo = NULL,
-	.dumpTxdInfo = NULL,
 	.showWtblInfo = NULL,
 	.showHifInfo = NULL,
 	.printHifDbgInfo = NULL,
+#if (CFG_SUPPORT_RA_GEN == 0)
+	.show_stat_info = mt6632_show_stat_info,
+#else
+	.show_stat_info = NULL,
+#endif
+	.show_mcu_debug_info = NULL,
+	.show_conninfra_debug_info = NULL,
 };
 
 /* Litien code refine to support multi chip */
@@ -473,7 +439,6 @@ struct mt66xx_chip_info mt66xx_chip_info_mt6632 = {
 	.is_support_cr4 = TRUE,
 	.txd_append_size = MT6632_TX_DESC_APPEND_LENGTH,
 	.rxd_size = MT6632_RX_DESC_LENGTH,
-	.init_evt_rxd_size = MT6632_RX_DESC_LENGTH,
 	.pse_header_length = NIC_TX_PSE_HEADER_LENGTH,
 	.init_event_size = MT6632_RX_INIT_EVENT_LENGTH,
 	.event_hdr_size = MT6632_RX_EVENT_HDR_LENGTH,
@@ -485,6 +450,7 @@ struct mt66xx_chip_info mt66xx_chip_info_mt6632 = {
 	.asicEnableFWDownload = NULL,
 	.asicGetChipID = NULL,
 	.downloadBufferBin = wlanDownloadBufferBin,
+	.showTaskStack = NULL,
 	.features = 0,
 	.is_support_hw_amsdu = FALSE,
 	.ucMaxSwAmsduNum = 0,
@@ -494,6 +460,12 @@ struct mt66xx_chip_info mt66xx_chip_info_mt6632 = {
 	.top_hcr = TOP_HCR,
 	.top_hvr = TOP_HVR,
 	.top_fvr = TOP_FVR,
+
+#if CFG_CHIP_RESET_SUPPORT
+	.asicWfsysRst = NULL,
+	.asicPollWfsysSwInitDone = NULL,
+#endif
+	.loadCfgSetting = NULL,
 };
 
 struct mt66xx_hif_driver_data mt66xx_driver_data_mt6632 = {

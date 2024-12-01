@@ -1,15 +1,8 @@
-/* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2012 MediaTek Inc.
+ */
 
-/*
- * Copyright (c) 2020 MediaTek Inc.
- */
-/*
- * hostapd / WPA authenticator glue code
- * Copyright (c) 2002-2012, Jouni Malinen <j@w1.fi>
- *
- * This software may be distributed under the terms of the BSD license.
- * See README for more details.
- */
 #include "wpa_supp/FourWayHandShake.h"
 #include "wpa_supp/src/ap/wpa_auth_glue.h"
 #include "wpa_supp/src/ap/ieee802_1x.h"
@@ -709,8 +702,8 @@ hostapd_wpa_auth_get_psk(void *ctx, const u8 *addr, const u8 *p2p_dev_addr,
 static int
 hostapd_wpa_auth_get_msk(void *ctx, const u8 *addr, u8 *msk, size_t *len) {
 	/*struct hostapd_data *hapd = ctx;*/
-	const u8 *key = NULL;
-	size_t keylen = 0;
+	const u8 *key;
+	size_t keylen;
 	struct sta_info *sta;
 
 	sta = NULL; /* ap_get_sta(hapd, addr) */

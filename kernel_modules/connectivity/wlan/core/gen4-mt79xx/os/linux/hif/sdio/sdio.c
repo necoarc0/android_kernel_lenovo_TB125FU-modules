@@ -1,54 +1,7 @@
-/******************************************************************************
- *
- * This file is provided under a dual license.  When you use or
- * distribute this software, you may choose to be licensed under
- * version 2 of the GNU General Public License ("GPLv2 License")
- * or BSD License.
- *
- * GPLv2 License
- *
- * Copyright(C) 2016 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * BSD LICENSE
- *
- * Copyright(C) 2016 MediaTek Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2016 MediaTek Inc.
+ */
 /******************************************************************************
 *[File]             sdio.c
 *[Version]          v1.0
@@ -91,6 +44,16 @@
 
 #include "mt66xx_reg.h"
 
+#if CFG_SUPPORT_WOW_EINT
+#include <linux/of.h>
+#include <linux/of_address.h>
+#include <linux/of_irq.h>
+#endif
+
+#if CFG_SUPPORT_WOW_EINT_KEYEVENT_WAKEUP
+#include <linux/input.h>
+#endif
+
 #if (CFG_SDIO_1BIT_DATA_MODE == 1)
 #include "test_driver_sdio_ops.h"
 #endif
@@ -105,6 +68,12 @@
 
 #define HIF_SDIO_ACCESS_RETRY_LIMIT         250
 #define HIF_SDIO_INTERRUPT_RESPONSE_TIMEOUT (15000)
+
+#if CFG_SUPPORT_WOW_EINT
+#define WAIT_POWERKEY_TIMEOUT		(5000)
+#define WIFI_COMPATIBLE_NODE_NAME	"mediatek,mediatek_wifi_ctrl"
+#define WIFI_INTERRUPT_NAME		"mediatek_wifi_ctrl-eint"
+#endif
 
 #if MTK_WCN_HIF_SDIO
 
@@ -159,6 +128,15 @@ static const struct sdio_device_id mtk_sdio_ids[] = {
 	{	SDIO_DEVICE(0x037a, 0x7603),
 		.driver_data = (kernel_ulong_t)&mt66xx_driver_data_mt7663},
 #endif /* MT7663 */
+#ifdef MT7961
+	{	SDIO_DEVICE(0x037a, 0x7901),
+		.driver_data = (kernel_ulong_t)&mt66xx_driver_data_mt7961},
+#endif /* MT7663 */
+#ifdef MT7902
+	{	SDIO_DEVICE(0x037a, 0x7902),
+		.driver_data = (kernel_ulong_t)&mt66xx_driver_data_mt7902},
+#endif /* MT7902 */
+
 	{ /* end: all zeroes */ },
 };
 
@@ -175,6 +153,7 @@ MODULE_DEVICE_TABLE(sdio, mtk_sdio_ids);
 *                            P U B L I C   D A T A
 ********************************************************************************
 */
+
 
 /*******************************************************************************
 *                           P R I V A T E   D A T A
@@ -217,6 +196,171 @@ static struct sdio_driver mtk_sdio_driver = {
 *                              F U N C T I O N S
 ********************************************************************************
 */
+#if CFG_SDIO_CONTEXT_DEBUG
+void print_content(uint32_t cmd_len, uint8_t *buffer)
+{
+	uint32_t i, j;
+
+	pr_debug(DRV_NAME"Start ===========\n");
+	j = (cmd_len>>2) + 1;
+	for (i = 0; i < j; i++) {
+		pr_debug(DRV_NAME"%02x %02x %02x %02x\n",
+			*(buffer + i*4 + 3), *(buffer + i*4 + 2),
+			*(buffer + i*4 + 1), *(buffer + i*4 + 0));
+	}
+	pr_debug(DRV_NAME"End =============\n");
+}
+#endif
+
+/*----------------------------------------------------------------------------*/
+/*!
+* \brief This function is a SDIO interrupt callback function
+*
+* \param[in] func  pointer to SDIO handle
+*
+* \return void
+*/
+/*----------------------------------------------------------------------------*/
+#if CFG_SUPPORT_WOW_EINT
+static irqreturn_t wifi_wow_isr(int irq, void *dev)
+{
+#if CFG_SUPPORT_WOW_EINT_KEYEVENT_WAKEUP
+	struct ADAPTER *pAd = (struct ADAPTER *)dev;
+
+	DBGLOG(HAL, INFO, "%s, received interrupt!\n", __func__);
+
+	disable_irq_nosync(pAd->rWowlanDevNode.wowlan_irq);
+	atomic_dec(&(pAd->rWowlanDevNode.irq_enable_count));
+
+	KAL_WAKE_LOCK_TIMEOUT(pAd, pAd->rWowlanDevNode.pr_eint_wlock,
+		MSEC_TO_JIFFIES(WAIT_POWERKEY_TIMEOUT));
+
+	input_report_key(pAd->prWowInputDev, KEY_POWER, 1);
+	input_sync(pAd->prWowInputDev);
+	input_report_key(pAd->prWowInputDev, KEY_POWER, 0);
+	input_sync(pAd->prWowInputDev);
+#endif
+
+	return IRQ_HANDLED;
+}
+
+static void wlan_register_irq(struct ADAPTER *prAdapter)
+{
+	struct device_node *eint_node = NULL;
+	int interrupts[2];
+	struct WOWLAN_DEV_NODE *node;
+
+	node = &prAdapter->rWowlanDevNode;
+
+	eint_node = of_find_compatible_node(NULL,
+			NULL, WIFI_COMPATIBLE_NODE_NAME);
+	if (eint_node) {
+		node->wowlan_irq = irq_of_parse_and_map(eint_node, 0);
+		DBGLOG(INIT, INFO, "%s, WOWLAN irq_number = %d\n", __func__,
+			node->wowlan_irq);
+		if (node->wowlan_irq) {
+			of_property_read_u32_array(eint_node,
+				"interrupts",
+				interrupts,
+				ARRAY_SIZE(interrupts));
+			node->wowlan_irqlevel = interrupts[1];
+			if (request_irq(node->wowlan_irq,
+				wifi_wow_isr,
+				node->wowlan_irqlevel,
+				WIFI_INTERRUPT_NAME,
+				prAdapter)) {
+				DBGLOG(INIT, ERROR,
+					"%s, WOWLAN irq NOT AVAILABLE!\n",
+					__func__);
+			} else {
+				disable_irq_nosync(node->wowlan_irq);
+			}
+		} else {
+			DBGLOG(INIT, ERROR,
+				"%s, can't find wifi_ctrl irq\n",
+				__func__);
+		}
+
+	} else {
+		node->wowlan_irq = 0;
+		DBGLOG(INIT, ERROR,
+			"%s, can't find wifi_ctrl compatible node\n",
+			__func__);
+	}
+}
+
+static void mtk_sdio_eint_interrupt(struct sdio_func *func)
+{
+	struct GLUE_INFO *prGlueInfo = NULL;
+
+	prGlueInfo = sdio_get_drvdata(func);
+	if (!prGlueInfo)
+		return;
+
+	prGlueInfo->prAdapter->rWowlanDevNode.func = func;
+	wlan_register_irq(prGlueInfo->prAdapter);
+#if CFG_SUPPORT_WOW_EINT_KEYEVENT_WAKEUP
+	KAL_WAKE_LOCK_INIT(NULL,
+		prGlueInfo->prAdapter->rWowlanDevNode.pr_eint_wlock,
+		"wifievent_eint");
+#endif
+}
+
+#if CFG_SUPPORT_WOW_EINT_KEYEVENT_WAKEUP
+static int mtk_wow_input_init(struct GLUE_INFO *prGlueInfo)
+{
+	int err = 0;
+
+	prGlueInfo->prAdapter->prWowInputDev = input_allocate_device();
+	if (prGlueInfo->prAdapter->prWowInputDev == NULL)
+		return -ENOMEM;
+	DBGLOG(HAL, INFO, "WOW input device allocate device\n");
+
+	prGlueInfo->prAdapter->prWowInputDev->name = "WOW_INPUT_DEVICE";
+	prGlueInfo->prAdapter->prWowInputDev->id.bustype = BUS_HOST;
+	prGlueInfo->prAdapter->prWowInputDev->id.vendor = 0x0001;
+	prGlueInfo->prAdapter->prWowInputDev->id.product = 0x0001;
+	prGlueInfo->prAdapter->prWowInputDev->id.version = 0x0001;
+
+	__set_bit(EV_KEY, prGlueInfo->prAdapter->prWowInputDev->evbit);
+	__set_bit(KEY_POWER, prGlueInfo->prAdapter->prWowInputDev->keybit);
+
+	err = input_register_device(prGlueInfo->prAdapter->prWowInputDev);
+	if (err < 0) {
+		input_free_device(prGlueInfo->prAdapter->prWowInputDev);
+		return err;
+	}
+
+	return 0;
+}
+#endif
+
+static void mtk_sdio_eint_free_irq(struct sdio_func *func)
+{
+	struct GLUE_INFO *prGlueInfo = NULL;
+	uint32_t u4Irq = 0;
+
+	prGlueInfo = sdio_get_drvdata(func);
+	if (!prGlueInfo)
+		return;
+
+	u4Irq = prGlueInfo->prAdapter->rWowlanDevNode.wowlan_irq;
+	if (u4Irq) {
+		disable_irq_nosync(u4Irq);
+		free_irq(u4Irq, prGlueInfo->prAdapter);
+	}
+#if CFG_SUPPORT_WOW_EINT_KEYEVENT_WAKEUP
+	if (KAL_WAKE_LOCK_ACTIVE(NULL, prGlueInfo->prAdapter
+			->rWowlanDevNode.pr_eint_wlock))
+		KAL_WAKE_UNLOCK(NULL,
+			prGlueInfo->prAdapter->rWowlanDevNode.pr_eint_wlock);
+	KAL_WAKE_LOCK_DESTROY(NULL,
+		prGlueInfo->prAdapter->rWowlanDevNode.pr_eint_wlock);
+#endif
+
+}
+
+#endif
 
 /*----------------------------------------------------------------------------*/
 /*!
@@ -240,7 +384,6 @@ static int32_t mtk_sdio_interrupt(unsigned long cltCtx)
 	/* ASSERT(prGlueInfo); */
 
 	if (!prGlueInfo) {
-		/* printk(KERN_INFO DRV_NAME"No glue info in mtk_sdio_interrupt()\n"); */
 		return -HIF_SDIO_ERR_FAIL;
 	}
 
@@ -248,8 +391,7 @@ static int32_t mtk_sdio_interrupt(unsigned long cltCtx)
 
 	prGlueInfo->IsrCnt++;
 
-	if (test_bit(GLUE_FLAG_HALT_BIT, &prGlueInfo->ulFlag)) {
-		/* printk(KERN_INFO DRV_NAME"GLUE_FLAG_HALT skip INT\n"); */
+	if (prGlueInfo->ulFlag & GLUE_FLAG_HALT) {
 		ret = mtk_wcn_hif_sdio_writeb(cltCtx, MCR_WHLPCR, WHLPCR_INT_EN_CLR);
 		return ret;
 	}
@@ -275,19 +417,15 @@ static void mtk_sdio_interrupt(struct sdio_func *func)
 	/* ASSERT(prGlueInfo); */
 
 	if (!prGlueInfo) {
-		/* printk(KERN_INFO DRV_NAME"No glue info in mtk_sdio_interrupt()\n"); */
 		return;
 	}
 
-	if (test_bit(GLUE_FLAG_HALT_BIT, &prGlueInfo->ulFlag)) {
+	if (prGlueInfo->ulFlag & GLUE_FLAG_HALT) {
 		sdio_writeb(prGlueInfo->rHifInfo.func, WHLPCR_INT_EN_CLR, MCR_WHLPCR, &ret);
-		/* printk(KERN_INFO DRV_NAME"GLUE_FLAG_HALT skip INT\n"); */
 		return;
 	}
 
 	sdio_writeb(prGlueInfo->rHifInfo.func, WHLPCR_INT_EN_CLR, MCR_WHLPCR, &ret);
-
-	prGlueInfo->rHifInfo.fgIsPendingInt = FALSE;
 
 	kalSetIntEvent(prGlueInfo);
 }
@@ -331,11 +469,10 @@ static int32_t mtk_sdio_probe(unsigned long cltCtx, const struct MTK_WCN_HIF_SDI
 	}
 
 	if (pfWlanProbe((void *)&cltCtx, (void *) sdio_driver_data) != WLAN_STATUS_SUCCESS) {
-		/* printk(KERN_WARNING DRV_NAME"pfWlanProbe fail!call pfWlanRemove()\n"); */
 		pfWlanRemove();
 		ret = -(HIF_SDIO_ERR_FAIL);
 	} else {
-		/* printk(KERN_INFO DRV_NAME"mtk_wifi_sdio_probe() done(%d)\n", ret); */
+
 	}
 	return ret;
 }
@@ -345,49 +482,23 @@ static int mtk_sdio_probe(struct sdio_func *func, const struct sdio_device_id *i
 	int ret = 0;
 	/* int i = 0; */
 
-	/* printk(KERN_INFO DRV_NAME "mtk_sdio_probe()\n"); */
-
 	ASSERT(func);
 	ASSERT(id);
-	/*
-	*printk(KERN_INFO DRV_NAME "Basic struct size checking...\n");
-	*printk(KERN_INFO DRV_NAME "sizeof(struct device) = %d\n", sizeof(struct device));
-	*printk(KERN_INFO DRV_NAME "sizeof(struct mmc_host) = %d\n", sizeof(struct mmc_host));
-	*printk(KERN_INFO DRV_NAME "sizeof(struct mmc_card) = %d\n", sizeof(struct mmc_card));
-	*printk(KERN_INFO DRV_NAME "sizeof(struct mmc_driver) = %d\n", sizeof(struct mmc_driver));
-	*printk(KERN_INFO DRV_NAME "sizeof(struct mmc_data) = %d\n", sizeof(struct mmc_data));
-	*printk(KERN_INFO DRV_NAME "sizeof(struct mmc_command) = %d\n", sizeof(struct mmc_command));
-	*printk(KERN_INFO DRV_NAME "sizeof(struct mmc_request) = %d\n", sizeof(struct mmc_request));
-	*printk(KERN_INFO DRV_NAME "sizeof(struct sdio_func) = %d\n", sizeof(struct sdio_func));
-	*
-	*printk(KERN_INFO DRV_NAME "Card information checking...\n");
-	*printk(KERN_INFO DRV_NAME "func = 0x%p\n", func);
-	*printk(KERN_INFO DRV_NAME "Number of info = %d:\n", func->card->num_info);
-	*
-	*
-	*for (i = 0; i < func->card->num_info; i++)
-	*	printk(KERN_INFO DRV_NAME "info[%d]: %s\n", i, func->card->info[i]);
-	*
-	*/
 
 	sdio_claim_host(func);
 	ret = sdio_enable_func(func);
 	sdio_release_host(func);
 
 	if (ret) {
-		/* printk(KERN_INFO DRV_NAME"sdio_enable_func failed!\n"); */
 		goto out;
 	}
-	/* printk(KERN_INFO DRV_NAME"sdio_enable_func done!\n"); */
 
 	if (pfWlanProbe((void *) func, (void *) id->driver_data) != WLAN_STATUS_SUCCESS) {
-		/* printk(KERN_WARNING DRV_NAME"pfWlanProbe fail!call pfWlanRemove()\n"); */
 		pfWlanRemove();
 		ret = -1;
 	}
 
 out:
-	/* printk(KERN_INFO DRV_NAME"mtk_sdio_probe() done(%d)\n", ret); */
 	return ret;
 }
 #endif
@@ -396,7 +507,7 @@ out:
 static int32_t mtk_sdio_remove(unsigned long cltCtx)
 {
 	int32_t ret = HIF_SDIO_ERR_SUCCESS;
-	/* printk(KERN_INFO DRV_NAME"pfWlanRemove done\n"); */
+
 	pfWlanRemove();
 
 	return ret;
@@ -404,18 +515,13 @@ static int32_t mtk_sdio_remove(unsigned long cltCtx)
 #else
 static void mtk_sdio_remove(struct sdio_func *func)
 {
-	/* printk(KERN_INFO DRV_NAME"mtk_sdio_remove()\n"); */
-
 	ASSERT(func);
-	/* printk(KERN_INFO DRV_NAME"pfWlanRemove done\n"); */
+
 	pfWlanRemove();
 
 	sdio_claim_host(func);
 	sdio_disable_func(func);
-	/* printk(KERN_INFO DRV_NAME"sdio_disable_func() done\n"); */
 	sdio_release_host(func);
-
-	/* printk(KERN_INFO DRV_NAME"mtk_sdio_remove() done\n"); */
 }
 #endif
 
@@ -429,6 +535,8 @@ static int mtk_sdio_pm_suspend(struct device *pDev)
 	struct GLUE_INFO *prGlueInfo = NULL;
 	struct ADAPTER *prAdapter = NULL;
 	uint8_t drv_own_fail = FALSE;
+	uint32_t count = 0;
+	struct WIFI_VAR *prWifiVar = NULL;
 
 	DBGLOG(HAL, STATE, "==>\n");
 
@@ -436,29 +544,91 @@ static int mtk_sdio_pm_suspend(struct device *pDev)
 	prGlueInfo = sdio_get_drvdata(func);
 	prAdapter = prGlueInfo->prAdapter;
 
-	DBGLOG(REQ, STATE, "Wow:%d, WowEnable:%d, state:%d\n",
-		prAdapter->rWifiVar.ucWow,
-		prAdapter->rWowCtrl.fgWowEnable,
-		kalGetMediaStateIndicated(prGlueInfo, AIS_DEFAULT_INDEX));
+	/* Stop upper layers calling the device hard_start_xmit routine. */
+	netif_tx_stop_all_queues(prGlueInfo->prDevHandler);
 
-	/* 1) wifi cfg "Wow" is true
-	*  2) wow is enable
-	*  3) WIfI connected => execute WOW flow
-	*/
-	if (prAdapter->rWifiVar.ucWow && prAdapter->rWowCtrl.fgWowEnable &&
-		(kalGetMediaStateIndicated(prGlueInfo, AIS_DEFAULT_INDEX) ==
-		MEDIA_STATE_CONNECTED)) {
-		DBGLOG(HAL, STATE, "enter WOW flow\n");
-		kalWowProcess(prGlueInfo, TRUE);
+	prWifiVar = &prGlueInfo->prAdapter->rWifiVar;
+
+#if CFG_ENABLE_WAKE_LOCK
+	/* change to non-READY state to block cfg80211 ops */
+	glSdioSetState(&prGlueInfo->rHifInfo, SDIO_STATE_PRE_SUSPEND_START);
+	{
+		u_int8_t state = 0;
+		if (!halIsHifStateReady(prAdapter, &state))
+		{
+			DBGLOG(HAL, STATE, ">>mtk_sdio_pm_suspend hif NOT ready\n");
+		}
+		else
+		{
+			DBGLOG(HAL, STATE, ">>mtk_sdio_pm_suspend hif ready!\n");
+		}
 	}
 
+	if (IS_FEATURE_ENABLED(prGlueInfo->prAdapter->rWifiVar.ucWow)) {
+		DBGLOG(HAL, STATE, ">> compile flag CFG_ENABLE_WAKE_LOCK\n");
+		aisPreSuspendFlow(prGlueInfo->prAdapter);
+		p2pRoleProcessPreSuspendFlow(prGlueInfo->prAdapter);
+	}
+
+#else
+
+    DBGLOG(HAL, STATE, ">> compile flag NON - CFG_ENABLE_WAKE_LOCK\n");
+	/* wait wiphy device do cfg80211 suspend done, then start hif suspend */
+	if (IS_FEATURE_ENABLED(prGlueInfo->prAdapter->rWifiVar.ucWow))
+		wlanWaitCfg80211SuspendDone(prGlueInfo);
+
+	/* change to non-READY state to block cfg80211 ops */
+	glSdioSetState(&prGlueInfo->rHifInfo, SDIO_STATE_PRE_SUSPEND_START);
+#endif
+
+	prGlueInfo->fgIsInSuspendMode = TRUE;
+#if (CFG_SUPPORT_PERMON == 1)
+	if (!wlan_perf_monitor_force_enable)
+		kalPerMonDisable(prGlueInfo);
+#endif
+
+	wlanSuspendPmHandle(prGlueInfo);
+
+	/* send pre-suspend cmd to notify FW do not send pkt/event to host */
+	halPreSuspendCmd(prAdapter);
+
+	while (prGlueInfo->rHifInfo.state != SDIO_STATE_PRE_SUSPEND_DONE) {
+		if (count > 500) {
+			DBGLOG(HAL, ERROR, "pre_suspend timeout\n");
+			break;
+		}
+		usleep_range(2000, 3000);
+		count++;
+	}
+	DBGLOG(HAL, STATE, "pre_suspend polling count: %d\n", count);
+
+	halDisableInterrupt(prAdapter);
+
 	prGlueInfo->rHifInfo.fgForceFwOwn = TRUE;
+
+#if CFG_SUPPORT_WOW_EINT
+	if (prAdapter->rWowlanDevNode.wowlan_irq != 0 &&
+		atomic_read(
+		&(prAdapter->rWowlanDevNode.irq_enable_count)) == 0) {
+		DBGLOG(HAL, ERROR, "%s:enable WIFI IRQ:%d\n", __func__,
+			prAdapter->rWowlanDevNode.wowlan_irq);
+		enable_irq(prAdapter->rWowlanDevNode.wowlan_irq);
+		enable_irq_wake(prAdapter->rWowlanDevNode.wowlan_irq);
+		atomic_inc(&(prAdapter->rWowlanDevNode.irq_enable_count));
+	} else {
+		DBGLOG(HAL, ERROR, "%s:irq_enable count:%d, WIFI IRQ:%d\n",
+		__func__,
+		atomic_read(
+		&(prAdapter->rWowlanDevNode.irq_enable_count)),
+			prAdapter->rWowlanDevNode.wowlan_irq);
+	}
+#endif
 
 	/* Wait for
 	*  1. The other unfinished ownership handshakes
 	*  2. FW own back
 	*/
-	while (wait < 100) {
+	while (wait < 500) {
 		if ((prAdapter->u4PwrCtrlBlockCnt == 0) &&
 		    (prAdapter->fgIsFwOwn == TRUE) &&
 		    (drv_own_fail == FALSE)) {
@@ -478,13 +648,13 @@ static int mtk_sdio_pm_suspend(struct device *pDev)
 		else
 			drv_own_fail = TRUE;
 		/* For single core CPU, let hif_thread can be completed */
-		kalMsleep(10);
+		usleep_range(1000, 3000);
 		RECLAIM_POWER_CONTROL_TO_PM(prAdapter, FALSE);
 
 		wait++;
 	}
 
-	if (wait >= 100) {
+	if (wait >= 500) {
 		DBGLOG(HAL, ERROR, "Set FW Own Timeout !!\n");
 		return -EAGAIN;
 	}
@@ -513,6 +683,14 @@ static int mtk_sdio_pm_suspend(struct device *pDev)
 		}
 	}
 
+	glSdioSetState(&prGlueInfo->rHifInfo, SDIO_STATE_SUSPEND);
+
+	/* pending cmd will be kept in queue and no one to handle it after HIF resume.
+	 * In STR, it will result in cmd buf full and then cmd buf alloc fail .
+	 */
+	if (IS_FEATURE_ENABLED(prGlueInfo->prAdapter->rWifiVar.ucWow))
+		wlanReleaseAllTxCmdQueue(prGlueInfo->prAdapter);
+
 	DBGLOG(HAL, STATE, "<==\n");
 	return 0;
 }
@@ -521,45 +699,68 @@ static int mtk_sdio_pm_resume(struct device *pDev)
 {
 	struct sdio_func *func;
 	struct GLUE_INFO *prGlueInfo = NULL;
+#if CFG_SUPPORT_WOW_EINT
+	struct ADAPTER *prAdapter = NULL;
+#endif
+	uint32_t count = 0;
 
 	DBGLOG(HAL, STATE, "==>\n");
 
 	func = dev_to_sdio_func(pDev);
 	prGlueInfo = sdio_get_drvdata(func);
 
-	DBGLOG(REQ, STATE, "Wow:%d, WowEnable:%d, state:%d\n",
-		prGlueInfo->prAdapter->rWifiVar.ucWow,
-		prGlueInfo->prAdapter->rWowCtrl.fgWowEnable,
-		kalGetMediaStateIndicated(prGlueInfo, AIS_DEFAULT_INDEX));
+	halEnableInterrupt(prGlueInfo->prAdapter);
+
+#if CFG_SUPPORT_WOW_EINT
+	prAdapter = prGlueInfo->prAdapter;
+
+	if (prAdapter->rWowlanDevNode.wowlan_irq != 0 &&
+		atomic_read(
+		&(prAdapter->rWowlanDevNode.irq_enable_count)) == 1) {
+		DBGLOG(HAL, ERROR, "%s:disable WIFI IRQ:%d\n", __func__,
+			prAdapter->rWowlanDevNode.wowlan_irq);
+		atomic_dec(&(prAdapter->rWowlanDevNode.irq_enable_count));
+		disable_irq_wake(prAdapter->rWowlanDevNode.wowlan_irq);
+		disable_irq(prAdapter->rWowlanDevNode.wowlan_irq);
+	} else {
+		DBGLOG(HAL, ERROR, "%s:irq_enable count:%d\n", __func__,
+			atomic_read(
+			&(prAdapter->rWowlanDevNode.irq_enable_count)));
+	}
+#endif
+
+	glSdioSetState(&prGlueInfo->rHifInfo, SDIO_STATE_PRE_RESUME);
 
 	prGlueInfo->rHifInfo.fgForceFwOwn = FALSE;
 
-	if (prGlueInfo->prAdapter->rWifiVar.ucWow &&
-		prGlueInfo->prAdapter->rWowCtrl.fgWowEnable &&
-		(kalGetMediaStateIndicated(prGlueInfo, AIS_DEFAULT_INDEX) ==
-		MEDIA_STATE_CONNECTED)) {
-		DBGLOG(HAL, STATE, "leave WOW flow\n");
-		kalWowProcess(prGlueInfo, FALSE);
+	halPreResumeCmd(prGlueInfo->prAdapter);
+
+	kalPerMonEnable(prGlueInfo);
+	prGlueInfo->fgIsInSuspendMode = FALSE;
+
+	while (prGlueInfo->rHifInfo.state != SDIO_STATE_LINK_UP) {
+		if (count > 500) {
+			DBGLOG(HAL, ERROR, "pre_resume timeout\n");
+			break;
+		}
+
+		kalUdelay(2000);
+		schedule();
+		count++;
 	}
+
+	wlanResumePmHandle(prGlueInfo);
+
+	/* change to READY state to allow cfg80211 ops */
+	glSdioSetState(&prGlueInfo->rHifInfo, SDIO_STATE_READY);
+
+	/* Allow upper layers to call the device hard_start_xmit routine. */
+	netif_tx_wake_all_queues(prGlueInfo->prDevHandler);
 
 	DBGLOG(HAL, STATE, "<==\n");
 	return 0;
 }
 
-static int mtk_sdio_suspend(struct device *pDev, pm_message_t state)
-{
-	/* printk(KERN_INFO "mtk_sdio: mtk_sdio_suspend dev(0x%p)\n", pDev); */
-	/* printk(KERN_INFO "mtk_sdio: MediaTek SDIO WLAN driver\n"); */
-
-	return mtk_sdio_pm_suspend(pDev);
-}
-
-int mtk_sdio_resume(struct device *pDev)
-{
-	/* printk(KERN_INFO "mtk_sdio: mtk_sdio_resume dev(0x%p)\n", pDev); */
-
-	return mtk_sdio_pm_resume(pDev);
-}
 #if (CFG_SDIO_ASYNC_IRQ_AUTO_ENABLE == 1)
 int mtk_sdio_async_irq_enable(struct sdio_func *func)
 {
@@ -597,6 +798,7 @@ int mtk_sdio_async_irq_enable(struct sdio_func *func)
 	sdio_f0_writeb(func, data, SDIO_CCCR_IRQ_EXT, &ret);
 	if (ret) {
 		DBGLOG(HAL, ERROR, "CCCR 0x%X write fail (%d).\n", SDIO_CCCR_IRQ_EXT, ret);
+		func->card->quirks = quirks_bak;
 		return FALSE;
 	}
 	func->card->quirks = quirks_bak;
@@ -628,9 +830,6 @@ uint32_t glRegisterBus(probe_card pfProbe, remove_card pfRemove)
 	ASSERT(pfProbe);
 	ASSERT(pfRemove);
 
-	/* printk(KERN_INFO "mtk_sdio: MediaTek SDIO WLAN driver\n"); */
-	/* printk(KERN_INFO "mtk_sdio: Copyright MediaTek Inc.\n"); */
-
 	pfWlanProbe = pfProbe;
 	pfWlanRemove = pfRemove;
 
@@ -642,9 +841,6 @@ uint32_t glRegisterBus(probe_card pfProbe, remove_card pfRemove)
 #else
 	mtk_sdio_driver.probe = mtk_sdio_probe;
 	mtk_sdio_driver.remove = mtk_sdio_remove;
-
-	mtk_sdio_driver.drv.suspend = mtk_sdio_suspend;
-	mtk_sdio_driver.drv.resume = mtk_sdio_resume;
 
 	ret = (sdio_register_driver(&mtk_sdio_driver) == 0) ? WLAN_STATUS_SUCCESS : WLAN_STATUS_FAILURE;
 #endif
@@ -704,11 +900,6 @@ void glSetHifInfo(struct GLUE_INFO *prGlueInfo, unsigned long ulCookie)
 #else
 	prHif->func = (struct sdio_func *)ulCookie;
 
-	/* printk(KERN_INFO DRV_NAME"prHif->func->dev = 0x%p\n", &prHif->func->dev); */
-	/* printk(KERN_INFO DRV_NAME"prHif->func->vendor = 0x%04X\n", prHif->func->vendor); */
-	/* printk(KERN_INFO DRV_NAME"prHif->func->device = 0x%04X\n", prHif->func->device); */
-	/* printk(KERN_INFO DRV_NAME"prHif->func->func = 0x%04X\n", prHif->func->num); */
-
 	sdio_set_drvdata(prHif->func, prGlueInfo);
 
 	SET_NETDEV_DEV(prGlueInfo->prDevHandler, &prHif->func->dev);
@@ -720,11 +911,14 @@ void glSetHifInfo(struct GLUE_INFO *prGlueInfo, unsigned long ulCookie)
 	for (ucIdx = HIF_TXC_IDX_0; ucIdx < HIF_TXC_IDX_NUM; ucIdx++)
 		prHif->au4PendingTxDoneCount[ucIdx] = 0;
 
+	spin_lock_init(&prHif->rStateLock);
+
 	mutex_init(&prHif->rRxFreeBufQueMutex);
 	mutex_init(&prHif->rRxDeAggQueMutex);
 
 	prHif->fgSkipRx = FALSE;
 	prGlueInfo->u4InfType = MT_DEV_INF_SDIO;
+	glSdioSetState(prHif, SDIO_STATE_READY);
 }				/* end of glSetHifInfo() */
 
 /*----------------------------------------------------------------------------*/
@@ -742,6 +936,20 @@ void glClearHifInfo(struct GLUE_INFO *prGlueInfo)
 	/* ASSERT(prGlueInfo); */
 	/* prHif = &prGlueInfo->rHifInfo; */
 }				/* end of glClearHifInfo() */
+
+/*----------------------------------------------------------------------------*/
+/*!
+* \brief This function reset necessary hif related info when chip reset.
+*
+* \param[in] prGlueInfo Pointer to glue info structure
+*
+* \return (none)
+*/
+/*----------------------------------------------------------------------------*/
+void glResetHifInfo(struct GLUE_INFO *prGlueInfo)
+{
+	ASSERT(prGlueInfo);
+} /* end of glResetHifInfo() */
 
 /*----------------------------------------------------------------------------*/
 /*!
@@ -781,24 +989,17 @@ u_int8_t glBusInit(void *pvData)
 	else
 		DBGLOG(INIT, INFO, "Async-IRQ is enabled.\n");
 #endif
-
+	/* Returns 0 on success, -EINVAL if the host does not support the
+	 *  requested block size, or -EIO (etc.) if one of the resultant
+	 *  FBR block size register writes failed.
+	 */
 	ret = sdio_set_block_size(func, 512);
 	sdio_release_host(func);
-
 	if (ret) {
-		/* printk(KERN_INFO
-		 *  DRV_NAME"sdio_set_block_size 512 failed!\n");
-		 */
-	} else {
-		/* printk(KERN_INFO
-		 *  DRV_NAME"sdio_set_block_size 512 done!\n");
-		 */
+		DBGLOG(HAL, ERROR,
+			"sdio_set_block_size fail!! ret: 0x%x\n", ret);
+		return FALSE;
 	}
-
-	/* printk(KERN_INFO DRV_NAME"param: func->cur_blksize(%d)\n", func->cur_blksize); */
-	/* printk(KERN_INFO DRV_NAME"param: func->max_blksize(%d)\n", func->max_blksize); */
-	/* printk(KERN_INFO DRV_NAME"param: func->card->host->max_blk_size(%d)\n", func->card->host->max_blk_size); */
-	/* printk(KERN_INFO DRV_NAME"param: func->card->host->max_blk_count(%d)\n", func->card->host->max_blk_count); */
 #endif
 	return TRUE;
 }				/* end of glBusInit() */
@@ -831,6 +1032,9 @@ void glBusRelease(void *pvData)
 int32_t glBusSetIrq(void *pvData, void *pfnIsr, void *pvCookie)
 {
 	int ret = 0;
+#if CFG_SUPPORT_WOW_EINT_KEYEVENT_WAKEUP
+	int InitStatus = 0;
+#endif
 
 	struct net_device *prNetDevice = NULL;
 	struct GLUE_INFO *prGlueInfo = NULL;
@@ -854,6 +1058,17 @@ int32_t glBusSetIrq(void *pvData, void *pfnIsr, void *pvCookie)
 	sdio_release_host(prHifInfo->func);
 #else
 	mtk_wcn_hif_sdio_enable_irq(prHifInfo->cltCtx, TRUE);
+#endif
+
+#if CFG_SUPPORT_WOW_EINT
+	mtk_sdio_eint_interrupt(prHifInfo->func);
+#endif
+
+#if CFG_SUPPORT_WOW_EINT_KEYEVENT_WAKEUP
+	InitStatus = mtk_wow_input_init(prGlueInfo);
+	if (InitStatus != 0)
+		DBGLOG(HAL, ERROR,
+			"alocating input device for WOW is failed\n");
 #endif
 
 	prHifInfo->fgIsPendingInt = FALSE;
@@ -882,14 +1097,12 @@ void glBusFreeIrq(void *pvData, void *pvCookie)
 
 	ASSERT(pvData);
 	if (!pvData) {
-		/* printk(KERN_INFO DRV_NAME"%s null pvData\n", __FUNCTION__); */
 		return;
 	}
 	prNetDevice = (struct net_device *)pvData;
 	prGlueInfo = (struct GLUE_INFO *) pvCookie;
 	ASSERT(prGlueInfo);
 	if (!prGlueInfo) {
-		/* printk(KERN_INFO DRV_NAME"%s no glue info\n", __FUNCTION__); */
 		return;
 	}
 
@@ -901,6 +1114,11 @@ void glBusFreeIrq(void *pvData, void *pvCookie)
 #else
 	mtk_wcn_hif_sdio_enable_irq(prHifInfo->cltCtx, FALSE);
 #endif
+
+#if CFG_SUPPORT_WOW_EINT
+	mtk_sdio_eint_free_irq(prHifInfo->func);
+#endif
+
 }				/* end of glBusreeIrq() */
 
 u_int8_t glIsReadClearReg(uint32_t u4Address)
@@ -972,6 +1190,8 @@ u_int8_t kalDevRegRead(IN struct GLUE_INFO *prGlueInfo, IN uint32_t u4Register, 
 	} while (ret);
 
 	if (ret) {
+		HAL_SET_FLAG(prGlueInfo->prAdapter, ADAPTER_FLAG_HW_ERR);
+		fgIsBusAccessFailed = TRUE;
 		kalSendAeeWarning(HIF_SDIO_ERR_TITLE_STR,
 				  HIF_SDIO_ERR_DESC_STR "sdio_readl() reports error: %x retry: %u", ret, ucRetryCount);
 		DBGLOG(HAL, ERROR, "sdio_readl() reports error: %x retry: %u\n", ret, ucRetryCount);
@@ -996,45 +1216,80 @@ u_int8_t kalDevRegRead_mac(IN struct GLUE_INFO *prGlueInfo, IN uint32_t u4Regist
 {
 	uint32_t value;
 	uint32_t u4Time, u4Current;
-	uint8_t ucResult;/* For Unchecked return value*/
+	u_int8_t ucResult;/* For Unchecked return value*/
+	u_int8_t fgOwnStatus = 0;
+	u_int8_t fgIssueOwn = FALSE;
+
+	HAL_LP_OWN_RD(prGlueInfo->prAdapter, &fgOwnStatus);
+	if (!fgOwnStatus) {
+		fgOwnStatus = nicpmSetDriverOwn(prGlueInfo->prAdapter);
+		if (!fgOwnStatus) {
+			DBGLOG(HAL, ERROR,
+				"Driver own fail before R/W mailbox CR!");
+			ucResult = FALSE;
+			goto Exit;
+		} else {
+			fgIssueOwn = TRUE;
+		}
+	}
 
     /* progrqm h2d mailbox0 as interested register address */
 	ucResult = kalDevRegWrite(prGlueInfo, MCR_H2DSM0R, u4Register);
+	if (ucResult == FALSE)
+		goto Exit;
 
     /* set h2d interrupt to notify firmware. bit16 */
 	ucResult = kalDevRegWrite(prGlueInfo, MCR_WSICR,
 			SDIO_MAILBOX_FUNC_READ_REG_IDX);
+	if (ucResult == FALSE)
+		goto Exit;
 
 	/* polling interrupt status asserted. bit16 */
 
 	/* first, disable interrupt enable for SDIO_MAILBOX_FUNC_READ_REG_IDX */
 	ucResult = kalDevRegRead(prGlueInfo, MCR_WHIER, &value);
+	if (ucResult == FALSE)
+		goto Exit;
+
 	ucResult = kalDevRegWrite(prGlueInfo, MCR_WHIER,
 			(value & ~SDIO_MAILBOX_FUNC_READ_REG_IDX));
+	if (ucResult == FALSE)
+		goto Exit;
 
 	u4Time = (uint32_t) kalGetTimeTick();
 
 	do {
 		/* check bit16 of WHISR assert for read register response */
 		ucResult = kalDevRegRead(prGlueInfo, MCR_WHISR, &value);
+		if (ucResult == FALSE)
+			goto Exit;
 
-		if (value & SDIO_MAILBOX_FUNC_READ_REG_IDX) {
+		if ((value & SDIO_MAILBOX_FUNC_READ_REG_IDX) ||
+			prGlueInfo->prAdapter->fgGetMailBoxRWAck) {
 			/* read d2h mailbox0 for interested register address */
 			ucResult = kalDevRegRead(prGlueInfo,
 						MCR_D2HRM0R, &value);
+			if (ucResult == FALSE)
+				goto Exit;
 
 			if (value != u4Register) {
 				DBGLOG(HAL, ERROR, "ERROR! kalDevRegRead_mac():register address mis-match");
 				DBGLOG(HAL, ERROR, "(u4Register = 0x%08x, reported register = 0x%08x)\n",
 				u4Register, value);
-				return  FALSE;
+
+				ucResult = FALSE;
+				goto Exit;
 			}
 
 			/* read d2h mailbox1 for the value of the register */
 			ucResult = kalDevRegRead(prGlueInfo,
 						MCR_D2HRM1R, &value);
+			if (ucResult == FALSE)
+				goto Exit;
 			*pu4Value = value;
-			return	TRUE;
+			// Set MCR_H2DSM0R to 0 for ack to FW.
+			ucResult = kalDevRegWrite(prGlueInfo, MCR_H2DSM0R, 0);
+			goto Exit;
 		}
 
 		/* timeout exceeding check */
@@ -1044,12 +1299,21 @@ u_int8_t kalDevRegRead_mac(IN struct GLUE_INFO *prGlueInfo, IN uint32_t u4Regist
 			|| (u4Current < u4Time && ((u4Current + (0xFFFFFFFF - u4Time))
 			> HIF_SDIO_INTERRUPT_RESPONSE_TIMEOUT))) {
 			DBGLOG(HAL, ERROR, "ERROR: kalDevRegRead_mac(): response timeout\n");
-			return	FALSE;
+			ucResult = FALSE;
+			goto Exit;
 		}
 
 		/* Response packet is not ready */
 		kalUdelay(50);
 	} while (1);
+
+Exit:
+	if (fgIssueOwn)
+		nicpmSetFWOwn(prGlueInfo->prAdapter, FALSE);
+
+	prGlueInfo->prAdapter->fgGetMailBoxRWAck = FALSE;
+
+	return ucResult;
 }
 
 /*----------------------------------------------------------------------------*/
@@ -1094,6 +1358,8 @@ u_int8_t kalDevRegWrite(IN struct GLUE_INFO *prGlueInfo, IN uint32_t u4Register,
 	} while (ret);
 
 	if (ret) {
+		HAL_SET_FLAG(prGlueInfo->prAdapter, ADAPTER_FLAG_HW_ERR);
+		fgIsBusAccessFailed = TRUE;
 		kalSendAeeWarning(HIF_SDIO_ERR_TITLE_STR,
 				  HIF_SDIO_ERR_DESC_STR "sdio_writel() reports error: %x retry: %u", ret, ucRetryCount);
 		DBGLOG(HAL, ERROR, "sdio_writel() reports error: %x retry: %u\n", ret, ucRetryCount);
@@ -1119,42 +1385,76 @@ u_int8_t kalDevRegWrite_mac(IN struct GLUE_INFO *prGlueInfo, IN uint32_t u4Regis
 	uint32_t value;
 	uint32_t u4Time, u4Current;
 	uint8_t ucResult; /* For Unchecked return value*/
+	u_int8_t fgOwnStatus = 0;
+	u_int8_t fgIssueOwn = FALSE;
+
+	HAL_LP_OWN_RD(prGlueInfo->prAdapter, &fgOwnStatus);
+	if (!fgOwnStatus) {
+		fgOwnStatus = nicpmSetDriverOwn(prGlueInfo->prAdapter);
+		if (!fgOwnStatus) {
+			DBGLOG(HAL, ERROR,
+				"Driver own fail before R/W mailbox CR!");
+			ucResult = FALSE;
+			goto Exit;
+		} else {
+			fgIssueOwn = TRUE;
+		}
+	}
 
 	/* progrqm h2d mailbox0 as interested register address */
 	ucResult = kalDevRegWrite(prGlueInfo, MCR_H2DSM0R, u4Register);
+	if (ucResult == FALSE)
+		goto Exit;
 
 	/* progrqm h2d mailbox1 as the value to write */
 	ucResult = kalDevRegWrite(prGlueInfo, MCR_H2DSM1R, u4Value);
+	if (ucResult == FALSE)
+		goto Exit;
 
 	/*  set h2d interrupt to notify firmware bit17 */
 	ucResult = kalDevRegWrite(prGlueInfo, MCR_WSICR,
 			SDIO_MAILBOX_FUNC_WRITE_REG_IDX);
+	if (ucResult == FALSE)
+		goto Exit;
 
 	/* polling interrupt status asserted. bit17 */
 
 	/* first, disable interrupt enable for SDIO_MAILBOX_FUNC_WRITE_REG_IDX */
 	ucResult = kalDevRegRead(prGlueInfo, MCR_WHIER, &value);
+	if (ucResult == FALSE)
+		goto Exit;
 	ucResult = kalDevRegWrite(prGlueInfo, MCR_WHIER,
 			(value & ~SDIO_MAILBOX_FUNC_WRITE_REG_IDX));
+	if (ucResult == FALSE)
+		goto Exit;
 
 	u4Time = (uint32_t) kalGetTimeTick();
 
 	do {
 		/* check bit17 of WHISR assert for response */
 		ucResult = kalDevRegRead(prGlueInfo, MCR_WHISR, &value);
+		if (ucResult == FALSE)
+			goto Exit;
 
-		if (value & SDIO_MAILBOX_FUNC_WRITE_REG_IDX) {
+		if ((value & SDIO_MAILBOX_FUNC_WRITE_REG_IDX) ||
+			prGlueInfo->prAdapter->fgGetMailBoxRWAck) {
 			/* read d2h mailbox0 for interested register address */
 			ucResult = kalDevRegRead(prGlueInfo,
 						MCR_D2HRM0R, &value);
+			if (ucResult == FALSE)
+				goto Exit;
 
 			if (value != u4Register) {
 				DBGLOG(HAL, ERROR, "ERROR! kalDevRegWrite_mac():register address mis-match");
 				DBGLOG(HAL, ERROR, "(u4Register = 0x%08x, reported register = 0x%08x)\n",
 				u4Register, value);
-				return  FALSE;
+
+				ucResult = FALSE;
+				goto Exit;
 			}
-			return	TRUE;
+			// Set MCR_H2DSM0R to 0 for ack to FW.
+			ucResult = kalDevRegWrite(prGlueInfo, MCR_H2DSM0R, 0);
+			goto Exit;
 		}
 
 		/* timeout exceeding check */
@@ -1164,12 +1464,21 @@ u_int8_t kalDevRegWrite_mac(IN struct GLUE_INFO *prGlueInfo, IN uint32_t u4Regis
 			|| (u4Current < u4Time && ((u4Current + (0xFFFFFFFF - u4Time))
 			> HIF_SDIO_INTERRUPT_RESPONSE_TIMEOUT))) {
 			DBGLOG(HAL, ERROR, "ERROR: kalDevRegWrite_mac(): response timeout\n");
-			return	FALSE;
+			ucResult = FALSE;
+			goto Exit;
 		}
 
 		/* Response packet is not ready */
 		kalUdelay(50);
 	} while (1);
+
+Exit:
+	if (fgIssueOwn)
+		nicpmSetFWOwn(prGlueInfo->prAdapter, FALSE);
+
+	prGlueInfo->prAdapter->fgGetMailBoxRWAck = FALSE;
+
+	return ucResult;
 }
 
 /*----------------------------------------------------------------------------*/
@@ -1200,10 +1509,6 @@ kalDevPortRead(IN struct GLUE_INFO *prGlueInfo,
 	struct sdio_func *prSdioFunc = NULL;
 #endif
 
-#if DBG
-	/* printk(KERN_INFO DRV_NAME"++kalDevPortRead++ buf:0x%p, port:0x%x, length:%d\n", pucBuf, u2Port, u4Len); */
-#endif
-
 	ASSERT(prGlueInfo);
 	prHifInfo = &prGlueInfo->rHifInfo;
 
@@ -1218,7 +1523,16 @@ kalDevPortRead(IN struct GLUE_INFO *prGlueInfo,
 	ASSERT(prSdioFunc->cur_blksize > 0);
 
 	sdio_claim_host(prSdioFunc);
-
+#if CFG_SDIO_PORT_DEBUG
+	DBGLOG(HAL, STATE, " port:0x%x, length:%d 1\n", u2Port, u4Len);
+#endif
+#if CFG_SER_L05_DEBUG
+	if ((prGlueInfo->prAdapter->ucSerState == SER_STOP_HOST_TX_RX)
+						&& (fgSerStopTxRxDB == 1)) {
+		dump_stack();
+		DBGLOG(HAL, ERROR, " port:0x%x, length:%d 1\n", u2Port, u4Len);
+	}
+#endif
 	/* Split buffer into multiple single block to workaround hifsys */
 	while (count >= prSdioFunc->cur_blksize) {
 		count -= prSdioFunc->cur_blksize;
@@ -1271,7 +1585,12 @@ kalDevPortRead(IN struct GLUE_INFO *prGlueInfo,
 		DBGLOG(HAL, ERROR, "sdio_readsb() reports error: %d\n", ret);
 		DBGLOG(HAL, ERROR, "\n");
 	}
-
+#if CFG_SER_L05_DEBUG
+	if ((prGlueInfo->prAdapter->ucSerState == SER_STOP_HOST_TX_RX)
+						&& (fgSerStopTxRxDB == 1)) {
+		DBGLOG(HAL, ERROR, "port:0x%x, length:%d 2\n", u2Port, u4Len);
+	}
+#endif
 	return (ret) ? FALSE : TRUE;
 }				/* end of kalDevPortRead() */
 
@@ -1303,10 +1622,6 @@ kalDevPortWrite(IN struct GLUE_INFO *prGlueInfo,
 	struct sdio_func *prSdioFunc = NULL;
 #endif
 
-#if DBG
-	/* printk(KERN_INFO DRV_NAME"++kalDevPortWrite++ buf:0x%p, port:0x%x, length:%d\n", pucBuf, u2Port, u2Len); */
-#endif
-
 	ASSERT(prGlueInfo);
 	prHifInfo = &prGlueInfo->rHifInfo;
 
@@ -1320,7 +1635,17 @@ kalDevPortWrite(IN struct GLUE_INFO *prGlueInfo,
 	ASSERT(prSdioFunc->cur_blksize > 0);
 
 	sdio_claim_host(prSdioFunc);
-
+#if CFG_SDIO_PORT_DEBUG
+	DBGLOG(HAL, STATE, "buf:0x%p, port:0x%x, length:%d\n",
+						pucBuf, u2Port, u4Len);
+#endif
+#if CFG_SER_L05_DEBUG
+	if ((prGlueInfo->prAdapter->ucSerState == SER_STOP_HOST_TX_RX)
+						&& (fgSerStopTxRxDB == 1)) {
+		dump_stack();
+		DBGLOG(HAL, ERROR, "port:0x%x, length:%d 1\n", u2Port, u4Len);
+	}
+#endif
 	/* Split buffer into multiple single block to workaround hifsys */
 	while (count >= prSdioFunc->cur_blksize) {
 		count -= prSdioFunc->cur_blksize;
@@ -1374,7 +1699,13 @@ kalDevPortWrite(IN struct GLUE_INFO *prGlueInfo,
 		DBGLOG(HAL, ERROR, "sdio_writesb() reports error: %d\n", ret);
 		DBGLOG(HAL, ERROR, "\n");
 	}
-
+#if CFG_SER_L05_DEBUG
+	if ((prGlueInfo->prAdapter->ucSerState == SER_STOP_HOST_TX_RX)
+						&& (fgSerStopTxRxDB == 1)) {
+		dump_stack();
+		DBGLOG(HAL, ERROR, "port:0x%x, length:%d 2\n", u2Port, u4Len);
+	}
+#endif
 	return (ret) ? FALSE : TRUE;
 }				/* end of kalDevPortWrite() */
 
@@ -1406,6 +1737,10 @@ void kalDevReadIntStatus(IN struct ADAPTER *prAdapter, OUT uint32_t *pu4IntStatu
 	prSDIOCtrl = prAdapter->prGlueInfo->rHifInfo.prSDIOCtrl;
 	ASSERT(prSDIOCtrl);
 
+#if CFG_SDIO_CONTEXT_DEBUG
+	DBGLOG(INTR, WARN, "buf:0x%p, port:0x%x, length:%d\n",
+							pucBuf, u2Port, u4Len);
+#endif
 	prStatCounter = &prAdapter->prGlueInfo->rHifInfo.rStatCounter;
 
 	/* There are pending interrupt to be handled */
@@ -1503,25 +1838,29 @@ u_int8_t kalDevWriteData(IN struct GLUE_INFO *prGlueInfo, IN struct MSDU_INFO *p
 {
 	struct ADAPTER *prAdapter = prGlueInfo->prAdapter;
 	struct GL_HIF_INFO *prHifInfo = &prGlueInfo->rHifInfo;
+	struct mt66xx_chip_info *prChipInfo;
 	struct TX_CTRL *prTxCtrl;
 	uint8_t *pucOutputBuf = (uint8_t *) NULL;
 	uint32_t u4PaddingLength;
 	struct sk_buff *skb;
 	uint8_t *pucBuf;
-	uint32_t u4Length;
+	uint32_t u4Length, u4TotalLen;
 	uint8_t ucTC;
 
 	SDIO_TIME_INTERVAL_DEC();
 
+	prChipInfo = prGlueInfo->prAdapter->chip_info;
 	skb = (struct sk_buff *)prMsduInfo->prPacket;
 	pucBuf = skb->data;
 	u4Length = skb->len;
+	u4TotalLen = skb->len + prChipInfo->u2HifTxdSize;
 	ucTC = prMsduInfo->ucTC;
 
 	prTxCtrl = &prAdapter->rTxCtrl;
 	pucOutputBuf = prTxCtrl->pucTxCoalescingBufPtr;
 
-	if (prTxCtrl->u4WrIdx + ALIGN_4(u4Length) > prAdapter->u4CoalescingBufCachedSize) {
+	if (prTxCtrl->u4WrIdx + ALIGN_4(u4TotalLen) >
+				prAdapter->u4CoalescingBufCachedSize) {
 		if ((prAdapter->u4CoalescingBufCachedSize - ALIGN_4(prTxCtrl->u4WrIdx)) >= HIF_TX_TERMINATOR_LEN) {
 			/* fill with single dword of zero as TX-aggregation termination */
 			*(uint32_t *) (&((pucOutputBuf)[ALIGN_4(prTxCtrl->u4WrIdx)])) = 0;
@@ -1539,6 +1878,9 @@ u_int8_t kalDevWriteData(IN struct GLUE_INFO *prGlueInfo, IN struct MSDU_INFO *p
 	}
 
 	SDIO_REC_TIME_START();
+	HAL_WRITE_HIF_TXD(prChipInfo, pucOutputBuf + prTxCtrl->u4WrIdx,
+				skb->len, TXD_PKT_FORMAT_TXD_PAYLOAD);
+	prTxCtrl->u4WrIdx += prChipInfo->u2HifTxdSize;
 	memcpy(pucOutputBuf + prTxCtrl->u4WrIdx, pucBuf, u4Length);
 	SDIO_REC_TIME_END();
 	SDIO_ADD_TIME_INTERVAL(prHifInfo->rStatCounter.u4TxDataCpTime);
@@ -1552,13 +1894,19 @@ u_int8_t kalDevWriteData(IN struct GLUE_INFO *prGlueInfo, IN struct MSDU_INFO *p
 	}
 
 	SDIO_REC_TIME_START();
+#if CFG_SUPPORT_MULTITHREAD
 	if (!prMsduInfo->pfTxDoneHandler)
 		kalFreeTxMsdu(prAdapter, prMsduInfo);
+#else
+	nicTxFreePacket(prAdapter, prMsduInfo, FALSE);
+	nicTxReturnMsduInfo(prAdapter, prMsduInfo);
+#endif
 	SDIO_REC_TIME_END();
 	SDIO_ADD_TIME_INTERVAL(prHifInfo->rStatCounter.u4TxDataFreeTime);
 
 	/* Update pending Tx done count */
-	halUpdateTxDonePendingCount(prAdapter, TRUE, ucTC, u4Length);
+	halUpdateTxDonePendingCount(prAdapter, TRUE, ucTC,
+					prMsduInfo->u2FrameLength);
 
 	prHifInfo->rStatCounter.u4DataPktWriteCnt++;
 
@@ -1621,24 +1969,36 @@ u_int8_t kalDevKickData(IN struct GLUE_INFO *prGlueInfo)
 * \retval FALSE         operation fail
 */
 /*----------------------------------------------------------------------------*/
-enum ENUM_CMD_TX_RESULT kalDevWriteCmd(IN struct GLUE_INFO *prGlueInfo,
-		IN struct CMD_INFO *prCmdInfo, IN uint8_t ucTC)
+u_int8_t kalDevWriteCmd(IN struct GLUE_INFO *prGlueInfo, IN struct CMD_INFO *prCmdInfo, IN uint8_t ucTC)
 {
 	struct ADAPTER *prAdapter = prGlueInfo->prAdapter;
 /*	P_GL_HIF_INFO_T prHifInfo = &prGlueInfo->rHifInfo; */
 	struct TX_CTRL *prTxCtrl;
 	uint8_t *pucOutputBuf = (uint8_t *) NULL;
 	uint16_t u2OverallBufferLength = 0;
+	uint32_t u4TotalLen;
+	struct mt66xx_chip_info *prChipInfo;
 /*	WLAN_STATUS u4Status = WLAN_STATUS_SUCCESS; */
 
+	prChipInfo = prGlueInfo->prAdapter->chip_info;
 	prTxCtrl = &prAdapter->rTxCtrl;
 	pucOutputBuf = prTxCtrl->pucTxCoalescingBufPtr;
+	u4TotalLen = prCmdInfo->u4TxdLen + prCmdInfo->u4TxpLen +
+		prChipInfo->u2HifTxdSize;
 
-	if (TFCB_FRAME_PAD_TO_DW(prCmdInfo->u4TxdLen + prCmdInfo->u4TxpLen) >
+	if (TFCB_FRAME_PAD_TO_DW(u4TotalLen) >
 		prAdapter->u4CoalescingBufCachedSize) {
 		DBGLOG(HAL, ERROR, "Command TX buffer underflow!\n");
-		return CMD_TX_RESULT_FAILED;
+		return FALSE;
 	}
+
+
+	HAL_WRITE_HIF_TXD(prChipInfo,
+			pucOutputBuf + u2OverallBufferLength,
+			prCmdInfo->u4TxdLen + prCmdInfo->u4TxpLen,
+			TXD_PKT_FORMAT_COMMAND);
+	u2OverallBufferLength += prChipInfo->u2HifTxdSize;
+
 
 	if (prCmdInfo->u4TxdLen) {
 		memcpy((pucOutputBuf + u2OverallBufferLength), prCmdInfo->pucTxd, prCmdInfo->u4TxdLen);
@@ -1671,7 +2031,7 @@ enum ENUM_CMD_TX_RESULT kalDevWriteCmd(IN struct GLUE_INFO *prGlueInfo,
 				   (prCmdInfo->u4TxdLen + prCmdInfo->u4TxpLen));
 
 	prGlueInfo->rHifInfo.rStatCounter.u4CmdPktWriteCnt++;
-	return CMD_TX_RESULT_SUCCESS;
+	return TRUE;
 }
 
 void glGetDev(void *ctx, struct device **dev)
@@ -1706,6 +2066,43 @@ u_int8_t glWakeupSdio(struct GLUE_INFO *prGlueInfo)
 #endif
 
 	return fgSuccess;
+}
+
+/*----------------------------------------------------------------------------*/
+/*!
+* \brief This function set SDIO state
+*
+* \param[in] prHifInfo  Pointer to the GL_HIF_INFO_T structure
+* \param[in] state      Specify TC index
+*
+* \retval TRUE          operation success
+* \retval FALSE         operation fail
+*/
+/*----------------------------------------------------------------------------*/
+void glSdioSetState(struct GL_HIF_INFO *prHifInfo, enum sdio_state state)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&prHifInfo->rStateLock, flags);
+	prHifInfo->state = state;
+	spin_unlock_irqrestore(&prHifInfo->rStateLock, flags);
+	DBGLOG(HAL, STATE, "sdio state:%d\n", state);
+}
+
+/*----------------------------------------------------------------------------*/
+/*!
+* \brief This function get SDIO state
+*
+* \param[in] prHifInfo  Pointer to the GL_HIF_INFO_T structure
+* \param[in] state      Specify TC index
+*
+* \retval TRUE          operation success
+* \retval FALSE         operation fail
+*/
+/*----------------------------------------------------------------------------*/
+enum sdio_state glSdioGetState(struct GL_HIF_INFO *prHifInfo)
+{
+	return prHifInfo->state;
 }
 
 #if (CFG_CHIP_RESET_SUPPORT == 1) && (MTK_WCN_HIF_SDIO == 0)

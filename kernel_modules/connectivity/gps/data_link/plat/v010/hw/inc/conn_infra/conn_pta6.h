@@ -69,3 +69,4 @@
 #define CONN_PTA6_TMR_CTRL_3_r_gps_l1_blank_tmr_thld_SHFT      0
 
 #endif /* __CONN_PTA6_REGS_H__ */
+

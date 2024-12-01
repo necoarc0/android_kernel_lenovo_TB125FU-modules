@@ -1,54 +1,7 @@
-/******************************************************************************
- *
- * This file is provided under a dual license.  When you use or
- * distribute this software, you may choose to be licensed under
- * version 2 of the GNU General Public License ("GPLv2 License")
- * or BSD License.
- *
- * GPLv2 License
- *
- * Copyright(C) 2016 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * BSD LICENSE
- *
- * Copyright(C) 2016 MediaTek Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2016 MediaTek Inc.
+ */
 /*
  * Id: tdls.c#1
  */
@@ -330,7 +283,6 @@ uint32_t TdlsexLinkOper(struct ADAPTER *prAdapter,
 			}
 		}
 
-		/* printk("TDLS_ENABLE_LINK %d\n", i); */
 		break;
 	case TDLS_DISABLE_LINK:
 
@@ -338,7 +290,6 @@ uint32_t TdlsexLinkOper(struct ADAPTER *prAdapter,
 				prBssInfo->ucBssIndex,
 				prCmd->aucPeerMac);
 
-		/* printk("TDLS_ENABLE_LINK %d\n", prStaRec->ucTdlsIndex); */
 		g_arTdlsLink[prStaRec->ucTdlsIndex] = 0;
 		if (IS_DLS_STA(prStaRec))
 			cnmStaRecFree(prAdapter, prStaRec);
@@ -367,6 +318,7 @@ uint32_t TdlsFrameGeneralIeAppend(struct ADAPTER *prAdapter,
 	struct GLUE_INFO *prGlueInfo;
 	struct BSS_INFO *prBssInfo;
 	struct PM_PROFILE_SETUP_INFO *prPmProfSetupInfo;
+	uint32_t u4NonHTPhyType;
 	uint16_t u2SupportedRateSet;
 	uint8_t aucAllSupportedRates[RATE_NUM_SW] = { 0 };
 	uint8_t ucAllSupportedRatesLen;
@@ -389,7 +341,9 @@ uint32_t TdlsFrameGeneralIeAppend(struct ADAPTER *prAdapter,
 
 	/* 3. Frame Formation - (5) Supported Rates element */
 	/* use all sup rate we can support */
-	u2SupportedRateSet = prStaRec->u2OperationalRateSet;
+	u4NonHTPhyType = prStaRec->ucNonHTBasicPhyType;
+	u2SupportedRateSet =
+		rNonHTPhyAttributes[u4NonHTPhyType].u2SupportedRateSet;
 	rateGetDataRatesFromRateSet(u2SupportedRateSet, 0,
 				    aucAllSupportedRates,
 				    &ucAllSupportedRatesLen);
@@ -535,7 +489,6 @@ TdlsDataFrameSend_TearDown(struct ADAPTER *prAdapter,
 
 	ReasonCode = u2StatusCode;
 
-	/* printk("\n\n ReasonCode = %u\n\n",ReasonCode ); */
 
 	kalMemCopy(pPkt, &ReasonCode, 2);
 	pPkt = pPkt + 2;
@@ -573,8 +526,6 @@ TdlsDataFrameSend_TearDown(struct ADAPTER *prAdapter,
 
 	/* 5. Update packet length */
 	prMsduInfo->len = u4PktLen;
-
-	/* printk(" TdlsDataFrameSend_TearDown !!\n"); */
 
 	/* 5. send the data frame */
 	wlanHardStartXmit(prMsduInfo, prMsduInfo->dev);
@@ -746,14 +697,12 @@ TdlsDataFrameSend_SETUP_REQ(struct ADAPTER *prAdapter,
 		u4IeLen = rlmFillHtCapIEByAdapter(prAdapter, prBssInfo, pPkt);
 		LR_TDLS_FME_FIELD_FILL(u4IeLen);
 	}
-#if 0 /* TODO: VHT support */
 #if CFG_SUPPORT_802_11AC
 	if (prAdapter->rWifiVar.ucAvailablePhyTypeSet &
 		PHY_TYPE_SET_802_11AC) {
 		u4IeLen = rlmFillVhtCapIEByAdapter(prAdapter, prBssInfo, pPkt);
 		LR_TDLS_FME_FIELD_FILL(u4IeLen);
 	}
-#endif
 #endif
 
 	/* 3.16 20/40 BSS Coexistence */
@@ -934,7 +883,6 @@ TdlsDataFrameSend_SETUP_RSP(struct ADAPTER *prAdapter,
 							  pPkt);
 			LR_TDLS_FME_FIELD_FILL(u4IeLen);
 		}
-#if 0 /* TODO: VHT support */
 #if CFG_SUPPORT_802_11AC
 		if (prAdapter->rWifiVar.ucAvailablePhyTypeSet &
 		    PHY_TYPE_SET_802_11AC) {
@@ -942,7 +890,6 @@ TdlsDataFrameSend_SETUP_RSP(struct ADAPTER *prAdapter,
 							   pPkt);
 			LR_TDLS_FME_FIELD_FILL(u4IeLen);
 		}
-#endif
 #endif
 
 		/* 3.17 20/40 BSS Coexistence */
@@ -1369,14 +1316,11 @@ TdlsDataFrameSend_DISCOVERY_RSP(struct ADAPTER *prAdapter,
 		u4IeLen = rlmFillHtCapIEByAdapter(prAdapter, prBssInfo, pPkt);
 		LR_TDLS_FME_FIELD_FILL(u4IeLen);
 	}
-
-#if 0 /* TODO: VHT support */
 #if CFG_SUPPORT_802_11AC
 	if (prAdapter->rWifiVar.ucAvailablePhyTypeSet & PHY_TYPE_SET_802_11AC) {
 		u4IeLen = rlmFillVhtCapIEByAdapter(prAdapter, prBssInfo, pPkt);
 		LR_TDLS_FME_FIELD_FILL(u4IeLen);
 	}
-#endif
 #endif
 
 	/* 3.14 20/40 BSS Coexistence */
@@ -1589,6 +1533,8 @@ TdlsSendChSwControlCmd(struct ADAPTER *prAdapter,
 
 	struct CMD_TDLS_CH_SW rCmdTdlsChSwCtrl;
 	struct BSS_INFO *prBssInfo;
+
+	ASSERT(prAdapter);
 
 	prBssInfo =
 		GET_BSS_INFO_BY_INDEX(prAdapter, AIS_DEFAULT_INDEX);

@@ -1,54 +1,7 @@
-/******************************************************************************
- *
- * This file is provided under a dual license.  When you use or
- * distribute this software, you may choose to be licensed under
- * version 2 of the GNU General Public License ("GPLv2 License")
- * or BSD License.
- *
- * GPLv2 License
- *
- * Copyright(C) 2016 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * BSD LICENSE
- *
- * Copyright(C) 2016 MediaTek Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2016 MediaTek Inc.
+ */
 /*! \file   connac.c
  *  \brief  Internal driver stack will export the required procedures here
  *          for GLUE Layer.
@@ -150,14 +103,15 @@ void connacConstructFirmwarePrio(struct GLUE_INFO *prGlueInfo,
 			continue;
 		}
 
-		/* Type 1. WIFI_RAM_CODE_soc1_0_1_1.bin */
+		/* Type 1. WIFI_RAM_CODE_soc1_0_1_1 */
 		ret = kalSnprintf(*(apucName + (*pucNameIdx)),
 				CFG_FW_NAME_MAX_LEN,
-				"%s_%u%s_%u.bin",
+				"%s_%u%s_%u",
 				apucConnacFwName[ucIdx],
 				CFG_WIFI_IP_SET,
 				aucFlavor,
-				1);
+				wlanGetEcoVersion(
+					prGlueInfo->prAdapter));
 		if (ret >= 0 && ret < CFG_FW_NAME_MAX_LEN)
 			(*pucNameIdx) += 1;
 		else
@@ -165,14 +119,15 @@ void connacConstructFirmwarePrio(struct GLUE_INFO *prGlueInfo,
 					"[%u] kalSnprintf failed, ret: %d\n",
 					__LINE__, ret);
 
-		/* Type 2. WIFI_RAM_CODE_soc1_0_1_1 */
+		/* Type 2. WIFI_RAM_CODE_soc1_0_1_1.bin */
 		ret = kalSnprintf(*(apucName + (*pucNameIdx)),
 				CFG_FW_NAME_MAX_LEN,
-				"%s_%u%s_%u",
+				"%s_%u%s_%u.bin",
 				apucConnacFwName[ucIdx],
 				CFG_WIFI_IP_SET,
 				aucFlavor,
-				1);
+				wlanGetEcoVersion(
+					prGlueInfo->prAdapter));
 		if (ret >= 0 && ret < CFG_FW_NAME_MAX_LEN)
 			(*pucNameIdx) += 1;
 		else
@@ -258,7 +213,7 @@ struct BUS_INFO connac_bus_info = {
 	.hifRst = NULL,
 	.initPcieInt = NULL,
 	.DmaShdlInit = asicPcieDmaShdlInit,
-	.setDmaIntMask = asicPdmaIntMaskConfig,
+	.DmaShdlReInit = NULL,
 #endif /* _HIF_PCIE || _HIF_AXI */
 #if defined(_HIF_USB)
 	.u4UdmaWlCfg_0_Addr = CONNAC_UDMA_WLCFG_0,
@@ -270,11 +225,17 @@ struct BUS_INFO connac_bus_info = {
 		UDMA_WLCFG_0_1US_TIMER_EN(1)),
 	.u4device_vender_request_in = DEVICE_VENDOR_REQUEST_IN,
 	.u4device_vender_request_out = DEVICE_VENDOR_REQUEST_OUT,
+	.fgIsSupportWdtEp = FALSE,
 	.asicUsbSuspend = NULL,
 	.asicUsbResume = NULL,
 	.asicUsbEventEpDetected = NULL,
 	.asicUsbRxByteCount = NULL,
 	.DmaShdlInit = asicUsbDmaShdlInit,
+	.DmaShdlReInit = NULL,
+	.asicUdmaRxFlush = NULL,
+#if CFG_CHIP_RESET_SUPPORT
+	.asicUsbEpctlRstOpt = NULL,
+#endif
 #endif /* _HIF_USB */
 };
 
@@ -288,7 +249,6 @@ struct FWDL_OPS_T connac_fw_dl_ops = {
 	.downloadByDynMemMap = NULL,
 	.getFwInfo = wlanGetConnacFwInfo,
 	.getFwDlInfo = asicGetFwDlInfo,
-	.phyAction = NULL,
 };
 
 struct TX_DESC_OPS_T connacTxDescOps = {
@@ -302,10 +262,19 @@ struct RX_DESC_OPS_T connacRxDescOps = {
 
 #if CFG_SUPPORT_QA_TOOL
 struct ATE_OPS_T connacAteOps = {
+	/*ICapStart phase out , wlan_service instead*/
 	.setICapStart = connacSetICapStart,
+	/*ICapStatus phase out , wlan_service instead*/
 	.getICapStatus = connacGetICapStatus,
+	/*CapIQData phase out , wlan_service instead*/
 	.getICapIQData = connacGetICapIQData,
 	.getRbistDataDumpEvent = nicExtEventICapIQData,
+	.u4EnBitWidth = 1, /*96 bit*/
+	.u4Architech = 0,  /*0:on-chip*/
+	.u4PhyIdx = 0,
+	.u4EmiStartAddress = 0,
+	.u4EmiEndAddress = 0,
+	.u4EmiMsbAddress = 0,
 };
 #endif
 
@@ -317,8 +286,6 @@ struct CHIP_DBG_OPS connac_debug_ops = {
 	.showTxdInfo = halShowTxdInfo,
 	.showCsrInfo = halShowHostCsrInfo,
 	.showDmaschInfo = halShowDmaschInfo,
-	.dumpMacInfo = haldumpMacInfo,
-	.dumpTxdInfo = halDumpTxdInfo,
 #else
 	.showPdmaInfo = NULL,
 	.showPseInfo = NULL,
@@ -326,16 +293,10 @@ struct CHIP_DBG_OPS connac_debug_ops = {
 	.showTxdInfo = NULL,
 	.showCsrInfo = NULL,
 	.showDmaschInfo = NULL,
-	.dumpMacInfo = NULL,
-	.dumpTxdInfo = NULL,
 #endif
 	.showWtblInfo = NULL,
 	.showHifInfo = NULL,
 	.printHifDbgInfo = halPrintHifDbgInfo,
-	.show_stat_info = halShowStatInfo,
-#ifdef CFG_SUPPORT_LINK_QUALITY_MONITOR
-	.get_rx_rate_info = connac_get_rx_rate_info,
-#endif
 };
 
 struct mt66xx_chip_info mt66xx_chip_info_connac = {
@@ -357,7 +318,6 @@ struct mt66xx_chip_info mt66xx_chip_info_connac = {
 	.is_support_cr4 = FALSE,
 	.txd_append_size = CONNAC_TX_DESC_APPEND_LENGTH,
 	.rxd_size = CONNAC_RX_DESC_LENGTH,
-	.init_evt_rxd_size = CONNAC_INIT_EVT_RX_DESC_LENGTH,
 	.pse_header_length = NIC_TX_PSE_HEADER_LENGTH,
 	.init_event_size = CONNAC_RX_INIT_EVENT_LENGTH,
 	.event_hdr_size = CONNAC_RX_EVENT_HDR_LENGTH,
@@ -373,6 +333,11 @@ struct mt66xx_chip_info mt66xx_chip_info_connac = {
 	.asicEnableFWDownload = asicEnableFWDownload,
 	.asicGetChipID = asicGetChipID,
 	.downloadBufferBin = NULL,
+#if CFG_MTK_ANDROID_WMT
+	.showTaskStack = connectivity_export_show_stack,
+#else
+	.showTaskStack = NULL,
+#endif
 	.is_support_hw_amsdu = FALSE,
 	.ucMaxSwAmsduNum = 4,
 	.ucMaxSwapAntenna = 2,
@@ -381,8 +346,13 @@ struct mt66xx_chip_info mt66xx_chip_info_connac = {
 	.top_hcr = TOP_HCR,
 	.top_hvr = TOP_HVR,
 	.top_fvr = TOP_FVR,
-	.custom_oid_interface_version = MTK_CUSTOM_OID_INTERFACE_VERSION,
-	.em_interface_version = MTK_EM_INTERFACE_VERSION,
+
+#if CFG_CHIP_RESET_SUPPORT
+	.asicWfsysRst = NULL,
+	.asicPollWfsysSwInitDone = NULL,
+#endif
+	.show_mcu_debug_info = NULL,
+	.show_conninfra_debug_info = NULL,
 };
 
 struct mt66xx_hif_driver_data mt66xx_driver_data_connac = {

@@ -1,14 +1,6 @@
-/* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
-
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2020 MediaTek Inc.
- */
-/*
- * SHA-256 hash implementation and interface functions
- * Copyright (c) 2003-2011, Jouni Malinen <j@w1.fi>
- *
- * This software may be distributed under the terms of the BSD license.
- * See README for more details.
+ * Copyright (c) 2011 MediaTek Inc.
  */
 
 #include "wpa_supp/FourWayHandShake.h"
@@ -29,15 +21,12 @@
 int
 sha256_vector(size_t num_elem, const u8 *addr[], const size_t *len, u8 *mac) {
 	/*struct sha256_state ctx;  //zalloc for deadbeef*/
-	struct nan_rdf_sha256_state *ctx;
+	struct sha256_state *ctx;
 	size_t i;
 
-	ctx = os_zalloc(sizeof(struct nan_rdf_sha256_state));
+	ctx = os_zalloc(sizeof(struct sha256_state));
 
-	if (ctx == NULL)
-		return -1;
-
-	nan_rdf_sha256_init(ctx);
+	sha256_init(ctx);
 	for (i = 0; i < num_elem; i++)
 		if (sha256_process(ctx, addr[i], len[i])) {
 			os_free(ctx);
@@ -94,7 +83,7 @@ static const unsigned long K[64] = {
 
 /* compress 512-bits */
 static int
-sha256_compress(struct nan_rdf_sha256_state *md, unsigned char *buf) {
+sha256_compress(struct sha256_state *md, unsigned char *buf) {
 	/*u32 S[8], W[64], t0, t1;    //zalloc for deadbeef*/
 	u32 t;
 	int i;
@@ -105,10 +94,6 @@ sha256_compress(struct nan_rdf_sha256_state *md, unsigned char *buf) {
 
 	S = os_zalloc(8 * sizeof(u32));
 	W = os_zalloc(64 * sizeof(u32));
-	if (!S || !W) {
-		DBGLOG(NAN, ERROR, "sha256 compress parameter is null!\n");
-		return -1;
-	}
 
 	/* copy state into S */
 	for (i = 0; i < 8; i++)
@@ -158,7 +143,7 @@ sha256_compress(struct nan_rdf_sha256_state *md, unsigned char *buf) {
 
 /* Initialize the hash state */
 void
-nan_rdf_sha256_init(struct nan_rdf_sha256_state *md) {
+sha256_init(struct sha256_state *md) {
 	md->curlen = 0;
 	md->length = 0;
 	md->state[0] = 0x6A09E667UL;
@@ -179,7 +164,7 @@ nan_rdf_sha256_init(struct nan_rdf_sha256_state *md) {
 *   @return CRYPT_OK if successful
 */
 int
-sha256_process(struct nan_rdf_sha256_state *md, const unsigned char *in,
+sha256_process(struct sha256_state *md, const unsigned char *in,
 	       unsigned long inlen) {
 	unsigned long n;
 
@@ -218,7 +203,7 @@ sha256_process(struct nan_rdf_sha256_state *md, const unsigned char *in,
 *   @return CRYPT_OK if successful
 */
 int
-sha256_done(struct nan_rdf_sha256_state *md, unsigned char *out) {
+sha256_done(struct sha256_state *md, unsigned char *out) {
 	int i;
 
 	if (md->curlen >= sizeof(md->buf))

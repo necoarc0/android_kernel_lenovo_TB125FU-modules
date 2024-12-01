@@ -1,54 +1,7 @@
-/*******************************************************************************
- *
- * This file is provided under a dual license.  When you use or
- * distribute this software, you may choose to be licensed under
- * version 2 of the GNU General Public License ("GPLv2 License")
- * or BSD License.
- *
- * GPLv2 License
- *
- * Copyright(C) 2016 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * BSD LICENSE
- *
- * Copyright(C) 2016 MediaTek Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- ******************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2016 MediaTek Inc.
+ */
 /*
 	Module Name:
 	gl_ate_agent.c
@@ -83,6 +36,8 @@
 union PFMU_PROFILE_TAG1 g_rPfmuTag1;
 union PFMU_PROFILE_TAG2 g_rPfmuTag2;
 union PFMU_DATA g_rPfmuData;
+struct PFMU_HE_INFO g_rPfmuHeInfo;
+uint8_t g_rBandIdx;
 #endif
 
 struct ATE_PRIV_CMD {
@@ -109,9 +64,6 @@ struct ATE_PRIV_CMD rAtePrivCmdTable[] = {
 	{"ATETXMCS", SetATETxMcs},
 	{"ATETXMODE", SetATETxMode},
 	{"ATEIPG", SetATEIpg},
-	{"ATEVHTNSS", SetATETxVhtNss},
-	{"ATETXANT", SetATETxPath},
-	{"ATERXANT", SetATERxPath},
 #if CFG_SUPPORT_ANT_SWAP
 	{"ATEANTSWP", SetATEAntSwp},
 #endif
@@ -147,6 +99,7 @@ struct ATE_PRIV_CMD rAtePrivCmdTable[] = {
 	{"TxBfPfmuMemRelease", Set_TxBfPfmuMemRelease},
 	{"StaRecCmmUpdate", Set_StaRecCmmUpdate},
 	{"StaRecBfUpdate", Set_StaRecBfUpdate},
+	{"StaRecBfHeUpdate", Set_StaRecBfHeUpdate},
 	{"DevInfoUpdate", Set_DevInfoUpdate},
 	{"BssInfoUpdate", Set_BssInfoUpdate},
 #if CFG_SUPPORT_MU_MIMO
@@ -239,7 +192,8 @@ int SetATE(struct net_device *prNetDev, uint8_t *prInBuf)
 	} else if (!strcmp(prInBuf, "ICAPSTART")) {
 		DBGLOG(REQ, INFO, "ATE_AGENT iwpriv SetATE - ICAPSTART\n");
 		i4Status = MT_ICAPStart(prNetDev, prInBuf);
-	} else if (prInBuf[0] == '1' || prInBuf[0] == '2'
+	} else if (prInBuf[0] == '0'
+	       || prInBuf[0] == '1' || prInBuf[0] == '2'
 		   || prInBuf[0] == '3' || prInBuf[0] == '4'
 		   || prInBuf[0] == '5' || prInBuf[0] == '6') {
 		DBGLOG(REQ, INFO,
@@ -654,103 +608,6 @@ int SetATEIpg(struct net_device *prNetDev, uint8_t *prInBuf)
 	rv = kstrtoint(prInBuf, 0, &i4SetTxIPG);
 	if (rv == 0)
 		i4Status = MT_ATESetTxIPG(prNetDev, i4SetTxIPG);
-	else
-		return -EINVAL;
-
-	return i4Status;
-}
-
-/*----------------------------------------------------------------------------*/
-/*!
- * \brief  This routine is called to Set Inter-Packet Guard Interval.
- *
- * \param[in] prNetDev		Pointer to the Net Device
- * \param[in] prInBuf		A pointer to the command string buffer
- * \param[out] None
- *
- * \retval 0				On success.
- * \retval -EINVAL			If invalid argument.
- */
-/*----------------------------------------------------------------------------*/
-int SetATETxVhtNss(struct net_device *prNetDev, uint8_t *prInBuf)
-{
-	uint32_t i4SetTVhtNSS = 0;
-	int32_t i4Status;
-	int32_t rv;
-
-	if (prInBuf == NULL)
-		return -EINVAL;
-
-	DBGLOG(REQ, INFO, "ATE_AGENT iwpriv SetATETxVhtNss\n");
-
-	rv = kstrtoint(prInBuf, 0, &i4SetTVhtNSS);
-	if (rv == 0)
-		i4Status = MT_ATESetTxVhtNss(prNetDev, i4SetTVhtNSS);
-	else
-		return -EINVAL;
-
-	return i4Status;
-}
-
-/*----------------------------------------------------------------------------*/
-/*!
- * \brief  This routine is called to Set Inter-Packet Guard Interval.
- *
- * \param[in] prNetDev		Pointer to the Net Device
- * \param[in] prInBuf		A pointer to the command string buffer
- * \param[out] None
- *
- * \retval 0				On success.
- * \retval -EINVAL			If invalid argument.
- */
-/*----------------------------------------------------------------------------*/
-int SetATETxPath(struct net_device *prNetDev, uint8_t *prInBuf)
-{
-	uint32_t i4TxPath = 0;
-	int32_t i4Status;
-	int32_t rv;
-
-
-	if (prInBuf == NULL)
-		return -EINVAL;
-
-	DBGLOG(REQ, INFO, "ATE_AGENT iwpriv SetATETxPath\n");
-
-	rv = kstrtoint(prInBuf, 0, &i4TxPath);
-	if (rv == 0)
-		i4Status = MT_ATESetTxPath(prNetDev, i4TxPath);
-	else
-		return -EINVAL;
-
-	return i4Status;
-}
-
-/*----------------------------------------------------------------------------*/
-/*!
- * \brief  This routine is called to Set Inter-Packet Guard Interval.
- *
- * \param[in] prNetDev		Pointer to the Net Device
- * \param[in] prInBuf		A pointer to the command string buffer
- * \param[out] None
- *
- * \retval 0				On success.
- * \retval -EINVAL			If invalid argument.
- */
-/*----------------------------------------------------------------------------*/
-int SetATERxPath(struct net_device *prNetDev, uint8_t *prInBuf)
-{
-	uint32_t i4RxPath = 0;
-	int32_t i4Status;
-	int32_t rv;
-
-	if (prInBuf == NULL)
-		return -EINVAL;
-
-	DBGLOG(REQ, INFO, "ATE_AGENT iwpriv SetATERxPath\n");
-
-	rv = kstrtoint(prInBuf, 0, &i4RxPath);
-	if (rv == 0)
-		i4Status = MT_ATESetRxPath(prNetDev, i4RxPath);
 	else
 		return -EINVAL;
 
@@ -1518,7 +1375,7 @@ int Set_Trigger_Sounding_Proc(struct net_device *prNetDev,
 		       prInBuf, ucSuMu, ucNumSta, ucSndInterval, ucWLan0,
 		       ucWLan1, ucWLan2, ucWLan3);
 		i4Status = TxBfSounding(prNetDev, ucSuMu, ucNumSta,
-			ucSndInterval, ucWLan0, ucWLan1, ucWLan2, ucWLan3);
+			(ucSndInterval << 2), ucWLan0, ucWLan1, ucWLan2, ucWLan3);
 	} else
 		return -EINVAL;
 
@@ -1567,8 +1424,8 @@ int Set_TxBfManualAssoc(struct net_device *prNetDev,
 			uint8_t *prInBuf)
 {
 	int32_t au4Mac[MAC_ADDR_LEN];
-	int32_t u4Type, u4Wtbl, u4Ownmac, u4PhyMode, u4Bw, u4Nss,
-		u4PfmuId, u4Mode, u4Marate, u4SpeIdx, ucaid, u4Rv;
+	int32_t u4Type, u4Wtbl, u4Ownmac, u4Bw, u4Nss,
+		u4PfmuId, u4Mode, u4Marate, u4SpeIdx, ucaid;
 	int8_t aucMac[MAC_ADDR_LEN];
 	int32_t i4Status = 0;
 	int32_t i = 0;
@@ -1580,26 +1437,26 @@ int Set_TxBfManualAssoc(struct net_device *prNetDev,
 	DBGLOG(RFTEST, ERROR, "TxBfManualAssoc\n");
 
 	rv = sscanf(prInBuf,
-		    "%x:%x:%x:%x:%x:%x:%x:%d:%x:%x:%x:%x:%d:%x:%x:%x:%d:%x",
+		    "%x:%x:%x:%x:%x:%x:%x:%d:%x:%x:%x:%d:%x:%x:%x:%d",
 		    &au4Mac[0], &au4Mac[1], &au4Mac[2], &au4Mac[3], &au4Mac[4],
 		    &au4Mac[5],
-		    &u4Type, &u4Wtbl, &u4Ownmac, &u4PhyMode, &u4Bw, &u4Nss,
-		    &u4PfmuId, &u4Mode, &u4Marate, &u4SpeIdx,
-		    &ucaid, &u4Rv);
-	if (rv == 18) {
+		    &u4Type, &u4Wtbl, &u4Ownmac, &u4Bw,
+		    &u4Nss, &u4PfmuId, &u4Mode, &u4Marate, &u4SpeIdx,
+		    &ucaid);
+	if (rv == 16) {
 		DBGLOG(RFTEST, ERROR,
-		       "TxBfManualAssoc au4Mac[0] = %x, au4Mac[1] = %x, au4Mac[2] = %xau4Mac[3] = %x, au4Mac[4] = %x, au4Mac[5] = %x, u4Type = %x, u4Wtbl = %d, u4Ownmac = %x, u4PhyMode = %x u4Bw = %x, u4Nss = %x, u4PfmuId = %d, u4Mode = %x, u4Marate = %x, u4SpeIdx = %d, ucaid = %d, u4Rv = %x",
+		       "TxBfManualAssoc au4Mac[0] = %x, au4Mac[1] = %x, au4Mac[2] = %xau4Mac[3] = %x, au4Mac[4] = %x, au4Mac[5] = %x, u4Type = %x, u4Wtbl = %d, u4Ownmac = %x, u4Bw = %x, u4Nss = %x, u4PfmuId = %d, u4Mode = %x, u4Marate = %x, u4SpeIdx = %d, ucaid = %d",
 		       au4Mac[0], au4Mac[1], au4Mac[2], au4Mac[3], au4Mac[4],
 		       au4Mac[5], u4Type, u4Wtbl, u4Ownmac,
-		       u4PhyMode, u4Bw, u4Nss, u4PfmuId, u4Mode, u4Marate,
-		       u4SpeIdx, ucaid, u4Rv);
+		       u4Bw, u4Nss, u4PfmuId, u4Mode, u4Marate,
+		       u4SpeIdx, ucaid);
 		for (i = 0; i < MAC_ADDR_LEN; i++)
 			aucMac[i] = au4Mac[i];
 
 		i4Status =
-			TxBfManualAssoc(prNetDev, aucMac, u4Type, u4Wtbl,
-				u4Ownmac, u4Mode, u4Bw, u4Nss, u4PfmuId,
-				u4Marate, u4SpeIdx, ucaid, u4Rv);
+			TxBfManualAssoc(prNetDev, aucMac, u4Type,
+				u4Wtbl,	u4Ownmac, u4Mode, u4Bw, u4Nss,
+				u4PfmuId, u4Marate, u4SpeIdx, ucaid);
 	} else
 		return -EINVAL;
 
@@ -1683,6 +1540,8 @@ int Set_DevInfoUpdate(struct net_device *prNetDev,
 		for (i = 0; i < MAC_ADDR_LEN; i++)
 			aucMacAddr[i] = OwnMacAddr[i];
 
+		g_rBandIdx = fgBand;
+
 		i4Status = DevInfoUpdate(prNetDev, u4OwnMacIdx, fgBand,
 					 aucMacAddr);
 	} else
@@ -1718,6 +1577,9 @@ int Set_BssInfoUpdate(struct net_device *prNetDev,
 		       au4BssId[5]);
 		for (i = 0; i < MAC_ADDR_LEN; i++)
 			aucBssId[i] = au4BssId[i];
+
+		i4Status = BssInfoConnectOwnDev(prNetDev, u4OwnMacIdx, u4BssIdx,
+					 g_rBandIdx);
 
 		i4Status = BssInfoUpdate(prNetDev, u4OwnMacIdx, u4BssIdx,
 					 aucBssId);
@@ -1779,7 +1641,7 @@ int Set_StaRecBfUpdate(struct net_device *prNetDev,
 	DBGLOG(RFTEST, ERROR, "Set_StaRecBfUpdate\n");
 
 	rv = sscanf(prInBuf,
-		    "%x:%x:%x:%x:%x:%d:%d:%d:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x",
+		    "%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x",
 		    &rStaRecBfUpdArg.u4WlanId, &rStaRecBfUpdArg.u4BssId,
 		    &rStaRecBfUpdArg.u4PfmuId,
 		    &rStaRecBfUpdArg.u4SuMu, &rStaRecBfUpdArg.u4eTxBfCap,
@@ -1812,13 +1674,113 @@ int Set_StaRecBfUpdate(struct net_device *prNetDev,
 			aucMemRow[i] = rStaRecBfUpdArg.au4MemRow[i];
 			aucMemCol[i] = rStaRecBfUpdArg.au4MemCol[i];
 		}
-		i4Status = StaRecBfUpdate(prNetDev, rStaRecBfUpdArg,
+
+		/* Default setting */
+		rStaRecBfUpdArg.u4SmartAnt     = 0;
+		/* 0: legacy, 1: OFDM, 2: HT, 4: VHT */
+		rStaRecBfUpdArg.u4SoundingPhy  = 1;
+		rStaRecBfUpdArg.u4iBfTimeOut   = 0xFF;
+		rStaRecBfUpdArg.u4iBfDBW       = 0;
+		rStaRecBfUpdArg.u4iBfNcol      = 0;
+		rStaRecBfUpdArg.u4iBfNrow      = 0;
+		rStaRecBfUpdArg.u4RuStartIdx   = 0;
+		rStaRecBfUpdArg.u4RuEndIdx     = 0;
+		rStaRecBfUpdArg.u4TriggerSu    = 0;
+		rStaRecBfUpdArg.u4TriggerMu    = 0;
+		rStaRecBfUpdArg.u4Ng16Su       = 0;
+		rStaRecBfUpdArg.u4Ng16Mu       = 0;
+		rStaRecBfUpdArg.u4Codebook42Su = 0;
+		rStaRecBfUpdArg.u4Codebook75Mu = 0;
+		rStaRecBfUpdArg.u4HeLtf        = 0;
+
+		if (g_rPfmuHeInfo.u4Config & BIT(MANUAL_HE_SU_MU))
+			rStaRecBfUpdArg.u4SuMu = g_rPfmuHeInfo.fgSU_MU;
+
+		if (g_rPfmuHeInfo.u4Config & BIT(MANUAL_HE_RU_RANGE)) {
+			rStaRecBfUpdArg.u4RuStartIdx =
+					g_rPfmuHeInfo.u1RuStartIdx;
+			rStaRecBfUpdArg.u4RuEndIdx = g_rPfmuHeInfo.u1RuEndIdx;
+		}
+
+		if (g_rPfmuHeInfo.u4Config & BIT(MANUAL_HE_TRIGGER)) {
+			rStaRecBfUpdArg.u4TriggerSu = g_rPfmuHeInfo.fgTriggerSu;
+			rStaRecBfUpdArg.u4TriggerMu = g_rPfmuHeInfo.fgTriggerMu;
+		}
+
+		if (g_rPfmuHeInfo.u4Config & BIT(MANUAL_HE_NG16)) {
+			rStaRecBfUpdArg.u4Ng16Su = g_rPfmuHeInfo.fgNg16Su;
+			rStaRecBfUpdArg.u4Ng16Mu = g_rPfmuHeInfo.fgNg16Mu;
+		}
+
+		if (g_rPfmuHeInfo.u4Config & BIT(MANUAL_HE_CODEBOOK)) {
+			rStaRecBfUpdArg.u4Codebook42Su =
+					g_rPfmuHeInfo.fgCodebook42Su;
+			rStaRecBfUpdArg.u4Codebook75Mu =
+					g_rPfmuHeInfo.fgCodebook75Mu;
+		}
+
+		if (g_rPfmuHeInfo.u4Config & BIT(MANUAL_HE_LTF))
+			rStaRecBfUpdArg.u4HeLtf = g_rPfmuHeInfo.u1HeLtf;
+
+		if (g_rPfmuHeInfo.u4Config & BIT(MANUAL_HE_IBF)) {
+			rStaRecBfUpdArg.u4iBfNcol = g_rPfmuHeInfo.uciBfNcol;
+			rStaRecBfUpdArg.u4iBfNrow = g_rPfmuHeInfo.uciBfNrow;
+		}
+
+		i4Status = StaRecBfUpdate(prNetDev, &rStaRecBfUpdArg,
 					  aucMemRow, aucMemCol);
 	} else
 		return -EINVAL;
 
 	return i4Status;
 }
+
+int Set_StaRecBfHeUpdate(struct net_device *prNetDev,
+		       uint8_t *prInBuf)
+{
+	uint32_t au4Input[13];
+	uint32_t u4Config;
+	uint8_t ucSuMu, ucRuStartIdx, ucRuEndIdx, ucTriggerSu, ucTriggerMu,
+		ucNg16Su, ucNg16Mu, ucCodebook42Su, ucCodebook75Mu, ucHeLtf,
+		uciBfNcol, uciBfNrow;
+	int32_t i4Status = 0;
+	int32_t rv;
+
+	DBGLOG(RFTEST, ERROR, "Set_StaRecBfHeUpdate\n");
+
+	rv = sscanf(prInBuf,
+			"%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x:%x",
+			&au4Input[0], &au4Input[1], &au4Input[2], &au4Input[3],
+			&au4Input[4], &au4Input[5], &au4Input[6], &au4Input[7],
+			&au4Input[8], &au4Input[9], &au4Input[10],
+			&au4Input[11], &au4Input[12]);
+
+	if (rv == 13) {
+		u4Config = au4Input[0];
+		ucSuMu = (uint8_t) au4Input[1];
+		ucRuStartIdx = (uint8_t) au4Input[2];
+		ucRuEndIdx = (uint8_t) au4Input[3];
+		ucTriggerSu = (uint8_t) au4Input[4];
+		ucTriggerMu = (uint8_t) au4Input[5];
+		ucNg16Su = (uint8_t) au4Input[6];
+		ucNg16Mu = (uint8_t) au4Input[7];
+		ucCodebook42Su = (uint8_t) au4Input[8];
+		ucCodebook75Mu = (uint8_t) au4Input[9];
+		ucHeLtf = (uint8_t) au4Input[10];
+		uciBfNcol = (uint8_t) au4Input[11];
+		uciBfNrow = (uint8_t) au4Input[12];
+
+		i4Status = StaRecBfHeUpdate(prNetDev, &g_rPfmuHeInfo, u4Config,
+				ucSuMu,	ucRuStartIdx, ucRuEndIdx, ucTriggerSu,
+				ucTriggerMu, ucNg16Su, ucNg16Mu,
+				ucCodebook42Su, ucCodebook75Mu,
+				ucHeLtf, uciBfNcol, uciBfNrow);
+	} else
+		return -EINVAL;
+
+	return i4Status;
+}
+
 
 #if CFG_SUPPORT_MU_MIMO
 int Set_MUGetInitMCS(struct net_device *prNetDev,

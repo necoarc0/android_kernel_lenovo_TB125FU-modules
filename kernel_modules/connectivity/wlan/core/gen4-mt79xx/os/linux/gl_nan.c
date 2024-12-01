@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2020 MediaTek Inc.
+ * Copyright (c) 2016 MediaTek Inc.
  */
 /*
- ** Id: @(#) gl_nan.c@@
+ * Id: @(#) gl_nan.c@@
  */
 
 /*! \file   gl_nan.c
@@ -44,14 +44,11 @@
 
 #define NAN_INF_NAME "nan%d"
 
-#define NAN_INF_NAME2 "aware_data%d"
-
 #if 0
 #define RUNNING_P2P_MODE 0
 #define RUNNING_AP_MODE 1
 #define RUNNING_DUAL_AP_MODE 2
 #endif
-
 /*******************************************************************************
  *                             D A T A   T Y P E S
  *******************************************************************************
@@ -70,7 +67,7 @@
 struct wireless_dev *g_aprNanRoleWdev[NAN_BSS_INDEX_NUM];
 struct _GL_NAN_INFO_T g_aprNanMultiDev[NAN_BSS_INDEX_NUM];
 
-static unsigned char *nifname = NAN_INF_NAME2;
+static unsigned char *nifname = NAN_INF_NAME;
 
 #if CFG_ENABLE_WIFI_DIRECT_CFG_80211
 #endif
@@ -212,7 +209,8 @@ nanAllocInfo(IN struct GLUE_INFO *prGlueInfo, uint8_t ucRoleIdx)
 		if (prGlueInfo->aprNANDevInfo[ucRoleIdx]) {
 			kalMemZero(prGlueInfo->aprNANDevInfo[ucRoleIdx],
 				   sizeof(struct _GL_NAN_INFO_T));
-		} else {
+		}
+		else {
 			DBGLOG(NAN, INFO, "alloc aprNANDevInfo fail\n");
 			goto err_alloc;
 		}
@@ -225,7 +223,7 @@ nanAllocInfo(IN struct GLUE_INFO *prGlueInfo, uint8_t ucRoleIdx)
 		}
 	}
 
-	for (ucIdx = 0; ucIdx < NAN_BSS_INDEX_NUM; ucIdx++) {
+    for (ucIdx = 0; ucIdx < NAN_BSS_INDEX_NUM; ucIdx++) {
 		/* chk if alloc successful or not */
 		if (prGlueInfo->aprNANDevInfo[ucRoleIdx] &&
 		    prWifiVar->aprNanSpecificBssInfo[ucIdx])
@@ -248,7 +246,7 @@ err_alloc:
 	}
 
 	if (prGlueInfo->aprNANDevInfo[ucRoleIdx]) {
-		kalMemFree(prGlueInfo->aprNANDevInfo[ucRoleIdx], VIR_MEM_TYPE,
+		kalMemFree(prGlueInfo->aprNANDevInfo, VIR_MEM_TYPE,
 		   sizeof(struct _GL_NAN_INFO_T));
 
 		prGlueInfo->aprNANDevInfo[ucRoleIdx] = NULL;
@@ -273,15 +271,12 @@ err_alloc:
 unsigned char
 nanFreeInfo(struct GLUE_INFO *prGlueInfo, uint8_t ucRoleIdx)
 {
-	struct ADAPTER *prAdapter;
+	struct ADAPTER *prAdapter = prGlueInfo->prAdapter;
 
 	if (!prGlueInfo) {
 		DBGLOG(NAN, ERROR, "prGlueInfo error\n");
 		return FALSE;
 	}
-
-	prAdapter = prGlueInfo->prAdapter;
-
 	if (!prAdapter) {
 		DBGLOG(NAN, ERROR, "prAdapter error!\n");
 		return FALSE;
@@ -396,13 +391,12 @@ nanNetUnregister(struct GLUE_INFO *prGlueInfo,
 
 	GLUE_SPIN_LOCK_DECLARATION();
 
+	prAdapter = prGlueInfo->prAdapter;
+
 	if (!prGlueInfo) {
 		DBGLOG(NAN, ERROR, "prGlueInfo error\n");
 		return FALSE;
 	}
-
-	prAdapter = prGlueInfo->prAdapter;
-
 	if (!prAdapter) {
 		DBGLOG(NAN, ERROR, "prAdapter error\n");
 		return FALSE;
@@ -553,9 +547,9 @@ glSetupNAN(struct GLUE_INFO *prGlueInfo, struct wireless_dev *prNanWdev,
 			nanFreeInfo(prGlueInfo, u4Idx);
 			return -1;
 		}
-		if (u4Idx == NAN_BSS_INDEX_BAND0) {
+		if (u4Idx == NAN_BSS_INDEX_BAND0)
 			prNetDevPriv->ucBssIdx = ucBssIndex;
-		}
+
 		wlanBindBssIdxToNetInterface(prGlueInfo, ucBssIndex,
 					(void *)prNANInfo->prDevHandler);
 	}
@@ -630,10 +624,6 @@ mtk_nan_wext_set_Multicastlist(struct GLUE_INFO *prGlueInfo)
 		prMCAddrList = kalMemAlloc(
 			MAX_NUM_GROUP_ADDR * ETH_ALEN, VIR_MEM_TYPE);
 
-		if (!prMCAddrList) {
-			DBGLOG(NAN, ERROR, "prMCAddrList is null!\n");
-			return;
-		}
 		netdev_for_each_mc_addr(ha, prDev) {
 			if (i < MAX_NUM_GROUP_ADDR) {
 				kalMemCopy(
@@ -646,11 +636,8 @@ mtk_nan_wext_set_Multicastlist(struct GLUE_INFO *prGlueInfo)
 				i++;
 			}
 		}
-		if (i >= MAX_NUM_GROUP_ADDR) {
-			kalMemFree(prMCAddrList, VIR_MEM_TYPE,
-			   MAX_NUM_GROUP_ADDR * ETH_ALEN);
+		if (i >= MAX_NUM_GROUP_ADDR)
 			return;
-		}
 
 		wlanoidSetNANMulticastList(
 			prGlueInfo->prAdapter,
@@ -692,8 +679,10 @@ glRegisterNAN(struct GLUE_INFO *prGlueInfo, const char *prDevName)
 {
 	struct ADAPTER *prAdapter = NULL;
 	uint8_t rMacAddr[6];
-	uint8_t rRandMacAddr[6] = {0};
+	uint8_t rRandMacAddr[6];
+#if (KERNEL_VERSION(3, 19, 0) <= CFG80211_VERSION_CODE)
 	uint8_t rRandMacMask[6] = {0xFF, 0xFF, 0xFF, 0x0, 0x0, 0x0};
+#endif
 	struct wireless_dev *prNanWdev = NULL;
 	struct net_device *prNanDev = NULL;
 	struct wiphy *prWiphy = NULL;
@@ -747,7 +736,9 @@ glRegisterNAN(struct GLUE_INFO *prGlueInfo, const char *prDevName)
 	COPY_MAC_ADDR(rMacAddr, prAdapter->rMyMacAddr);
 	rMacAddr[0] |= 0x2;
 
+#if (KERNEL_VERSION(3, 19, 0) <= CFG80211_VERSION_CODE)
 	get_random_mask_addr(rRandMacAddr, rMacAddr, rRandMacMask);
+#endif
 
 	/* change to local administrated address */
 	rRandMacAddr[0] ^= (eRole + 1) << 3;
@@ -869,10 +860,9 @@ glUnregisterNAN(struct GLUE_INFO *prGlueInfo)
 	/* uninitialize NAN Scheduler */
 	nanSchedUninit(prAdapter);
 
-	/* 4 <1> Uninit NAN dev FSM
-	 * Uninit NAN device FSM
-	 * only do nanDevFsmUninit, when unregister all nan device
-	 */
+	/* 4 <1> Uninit NAN dev FSM */
+	/* Uninit NAN device FSM */
+	/* only do nanDevFsmUninit, when unregister all nan device */
 	nanDevFsmUninit(prGlueInfo->prAdapter, ucIdx);
 
 	/* 4 <3> Free Wiphy & netdev */
@@ -1134,10 +1124,9 @@ nanSetMulticastList(IN struct net_device *prDev)
 	}
 	/* TO-DO MulticastList Support */
 	if (g_aprNanMultiDev[ucRoleIdx].fgBMCFilterSet == FALSE) {
+
 		g_aprNanMultiDev[ucRoleIdx].fgBMCFilterSet = TRUE;
-		/* Mark HALT, notify main thread to
-		 * finish current job
-		 */
+		/* Mark HALT, notify main thread to finish current job*/
 		set_bit(GLUE_FLAG_NAN_MULTICAST_BIT,
 			&prGlueInfo->ulFlag);
 		/* wake up main thread */
@@ -1186,13 +1175,13 @@ nanHardStartXmit(IN struct sk_buff *prSkb, IN struct net_device *prDev)
 
 		if (IS_BMCAST_MAC_ADDR(prTxPktInfo.aucEthDestAddr)) {
 			DBGLOG(NAN, LOUD, "TX with DA = BMCAST\n");
-		} else {
+		}
+		else {
 			prStaRec = nanGetStaRecByNDI(prGlueInfo->prAdapter,
 				prTxPktInfo.aucEthDestAddr);
 			if (prStaRec != NULL) {
 				ucBssIndex = prStaRec->ucBssIndex;
-				DBGLOG(NAN, LOUD, "Starec bssIndex:%d\n",
-							ucBssIndex);
+				DBGLOG(NAN, LOUD, "Starec bssIndex:%d\n", ucBssIndex);
 			}
 		}
 	}

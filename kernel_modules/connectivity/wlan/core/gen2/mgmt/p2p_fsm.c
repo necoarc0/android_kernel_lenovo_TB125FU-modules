@@ -248,7 +248,7 @@ VOID p2pFsmUninit(IN P_ADAPTER_T prAdapter)
 PUINT_8
 	p2pFsmGetFsmState(
 	IN ENUM_P2P_STATE_T eCurrentState) {
-	if (eCurrentState < P2P_STATE_NUM)
+	if (eCurrentState >= 0 && eCurrentState < P2P_STATE_NUM)
 		return apucDebugP2pState[eCurrentState];
 
 	return (PUINT_8) DISP_STRING("UNKNOWN");
@@ -257,7 +257,7 @@ PUINT_8
 UINT_8
 	p2pFsmGetFsmState(
 	IN ENUM_P2P_STATE_T eCurrentState) {
-	if (eCurrentState < P2P_STATE_NUM)
+	if (eCurrentState >= 0 && eCurrentState < P2P_STATE_NUM)
 		return apucDebugP2pState[eCurrentState];
 
 	return P2P_STATE_NUM;

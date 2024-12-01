@@ -1,15 +1,8 @@
-/* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2021 MediaTek Inc.
+ */
 
-/*
- * Copyright (c) 2020 MediaTek Inc.
- */
-/*
- * WPA Supplicant - Glue code to setup EAPOL and RSN modules
- * Copyright (c) 2003-2015, Jouni Malinen <j@w1.fi>
- *
- * This software may be distributed under the terms of the BSD license.
- * See README for more details.
- */
 #include "wpa_supp/FourWayHandShake.h"
 /*#include "wpa_supp/wpa_supplicant/wps_supplicant.h"*/
 /*#include "wpa_supp/wpaSuppCmdEvt.h"*/
@@ -579,6 +572,7 @@ wpa_supplicant_init_wpa(struct wpa_supplicant *wpa_s) {
 	wpa_s->wpa = wpa_sm_init(ctx);
 	if (wpa_s->wpa == NULL) {
 		wpa_printf(MSG_ERROR, "Failed to initialize WPA state machine");
+		os_free(ctx);
 		return -1;
 	}
 

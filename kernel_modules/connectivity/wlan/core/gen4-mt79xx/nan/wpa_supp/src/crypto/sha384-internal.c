@@ -1,14 +1,6 @@
-/* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
-
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2020 MediaTek Inc.
- */
-/*
- * SHA-384 hash implementation and interface functions
- * Copyright (c) 2015, Pali Rohár <pali.rohar@gmail.com>
- *
- * This software may be distributed under the terms of the BSD license.
- * See README for more details.
+ * Copyright (c) 2015 MediaTek Inc.
  */
 
 #include "wpa_supp/FourWayHandShake.h"

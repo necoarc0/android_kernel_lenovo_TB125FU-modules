@@ -1,54 +1,7 @@
-/******************************************************************************
- *
- * This file is provided under a dual license.  When you use or
- * distribute this software, you may choose to be licensed under
- * version 2 of the GNU General Public License ("GPLv2 License")
- * or BSD License.
- *
- * GPLv2 License
- *
- * Copyright(C) 2016 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * BSD LICENSE
- *
- * Copyright(C) 2016 MediaTek Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2016 MediaTek Inc.
+ */
 /*
  ** Id: //Department/DaVinci/BRANCHES/HS2_DEV_SW/
  * MT6620_WIFI_DRIVER_V2_1_HS_2_0/mgmt/hs20.c#2
@@ -110,6 +63,83 @@
  *                              F U N C T I O N S
  ******************************************************************************
  */
+
+/*---------------------------------------------------------------------------*/
+/*!
+ * \brief    This function is called to generate Interworking IE
+ *             for Probe Rsp, Bcn, Assoc Req/Rsp.
+ *
+ * \param[in] prAdapter  Pointer of ADAPTER_T
+ * \param[out] prMsduInfo  Pointer of the Msdu Info
+ *
+ * \return VOID
+ */
+/*---------------------------------------------------------------------------*/
+void hs20GenerateInterworkingIE(IN struct ADAPTER *prAdapter,
+		OUT struct MSDU_INFO *prMsduInfo)
+{
+}
+
+/*---------------------------------------------------------------------------*/
+/*!
+ * \brief    This function is called to generate Roaming Consortium IE
+ *             for Probe Rsp, Bcn, Assoc Req/Rsp.
+ *
+ * \param[in] prAdapter  Pointer of ADAPTER_T
+ * \param[out] prMsduInfo  Pointer of the Msdu Info
+ *
+ * \return VOID
+ */
+/*---------------------------------------------------------------------------*/
+void hs20GenerateRoamingConsortiumIE(IN struct ADAPTER *prAdapter,
+		OUT struct MSDU_INFO *prMsduInfo)
+{
+}
+
+/*---------------------------------------------------------------------------*/
+/*!
+ * \brief    This function is called to generate HS2.0 IE
+ *             for Probe Rsp, Bcn, Assoc Req/Rsp.
+ *
+ * \param[in] prAdapter  Pointer of ADAPTER_T
+ * \param[out] prMsduInfo  Pointer of the Msdu Info
+ *
+ * \return VOID
+ */
+/*---------------------------------------------------------------------------*/
+void hs20GenerateHS20IE(IN struct ADAPTER *prAdapter,
+		OUT struct MSDU_INFO *prMsduInfo)
+{
+	struct HS20_INFO *prHS20Info;
+	uint8_t ucBssIndex = 0;
+	uint8_t *pucBuffer;
+
+	ASSERT(prAdapter);
+	ASSERT(prMsduInfo);
+
+	ucBssIndex = prMsduInfo->ucBssIndex;
+
+	if (!IS_BSS_INDEX_AIS(prAdapter, ucBssIndex) {
+		pr_info("[%s] prMsduInfo->ucBssIndex(%d) is not AIS\n",
+			__func__, ucBssIndex);
+		return;
+	}
+
+	pucBuffer = (uint8_t *)
+		((unsigned long) prMsduInfo->prPacket +
+		(unsigned long) prMsduInfo->u2FrameLength);
+
+	/* ASSOC INFO IE ID: 221 :0xDD */
+	prHS20Info = aisGetHS20Info(prAdapter, ucBssIndex);
+	if (prHS20Info && prHS20Info->u2HS20AssocInfoIELen) {
+		kalMemCopy(pucBuffer,
+			&prHS20Info->aucHS20AssocInfoIE,
+			prHS20Info->u2HS20AssocInfoIELen);
+		prMsduInfo->u2FrameLength +=
+			prHS20Info->u2HS20AssocInfoIELen;
+	}
+
+}
 
 void hs20FillExtCapIE(struct ADAPTER *prAdapter,
 		struct BSS_INFO *prBssInfo, struct MSDU_INFO *prMsduInfo)
@@ -343,7 +373,7 @@ u_int8_t hs20IsGratuitousArp(IN struct ADAPTER *prAdapter,
 		prCurrSwRfb->pvHeader + ETHER_HEADER_LEN + ARP_TARGET_IP_OFFSET;
 	uint8_t *pucSenderMac = ((uint8_t *)
 		prCurrSwRfb->pvHeader +
-		ETHER_HEADER_LEN + ARP_SENDER_MAC_OFFSET);
+		ETHER_HEADER_LEN + ARP_SNEDER_MAC_OFFSET);
 
 #if CFG_HS20_DEBUG && 0
 /* UINT_8  aucIpAllZero[4] = {0,0,0,0}; */
@@ -425,6 +455,76 @@ u_int8_t hs20IsUnsolicitedNeighborAdv(IN struct ADAPTER *prAdapter,
 	return FALSE;
 }
 
+#if CFG_ENABLE_GTK_FRAME_FILTER
+u_int8_t hs20IsForgedGTKFrame(IN struct ADAPTER *prAdapter,
+		IN struct BSS_INFO *prBssInfo, IN struct SW_RFB *prCurrSwRfb)
+{
+	struct CONNECTION_SETTINGS *prConnSettings =
+		aisGetConnSettings(prAdapter, prBssInfo->ucBssIndex);
+	uint8_t *pucEthDestAddr = prCurrSwRfb->pvHeader;
+
+	/* 3 TODO: Need to verify this function before enable it */
+	return FALSE;
+
+	if ((prConnSettings->eEncStatus != ENUM_ENCRYPTION_DISABLED)
+	    && IS_BMCAST_MAC_ADDR(pucEthDestAddr)) {
+		uint8_t ucIdx = 0;
+		uint32_t *prIpAddr, *prPacketDA;
+		uint16_t *pu2PktIpVer =
+		    (uint16_t *) ((uint8_t *)
+		    prCurrSwRfb->pvHeader +
+		    (ETHER_HEADER_LEN - ETHER_TYPE_LEN));
+
+		if (*pu2PktIpVer == htons(ETH_P_IPV4)) {
+			if (!prBssInfo->prIpV4NetAddrList)
+				return FALSE;
+			for (ucIdx = 0;
+				ucIdx < prBssInfo
+					->prIpV4NetAddrList->ucAddrCount;
+				ucIdx++) {
+				prIpAddr = (uint32_t *)
+					&prBssInfo->prIpV4NetAddrList
+					->arNetAddr[ucIdx].aucIpAddr[0];
+				prPacketDA =
+				    (uint32_t *) ((uint8_t *)
+				    prCurrSwRfb->pvHeader +
+				    ETHER_HEADER_LEN +
+					IPV4_HDR_IP_DST_ADDR_OFFSET);
+
+				if (kalMemCmp(prIpAddr, prPacketDA, 4) == 0) {
+					kalPrint("Drop FORGED IPv4 packet\n");
+					return TRUE;
+				}
+			}
+		}
+#ifdef CONFIG_IPV6
+		else if (*pu2PktIpVer == htons(ETH_P_IPV6)) {
+			uint8_t aucIPv6Mac[MAC_ADDR_LEN];
+			uint8_t *pucIdx =
+			    prCurrSwRfb->pvHeader +
+			    ETHER_HEADER_LEN +
+			    IPV6_HDR_IP_DST_ADDR_MAC_HIGH_OFFSET;
+
+			kalMemCopy(&aucIPv6Mac[0], pucIdx, 3);
+			pucIdx += 5;
+			kalMemCopy(&aucIPv6Mac[3], pucIdx, 3);
+			kalPrint(
+				"Get IPv6 frame Dst IP MAC part " MACSTR "\n",
+				MAC2STR(aucIPv6Mac));
+
+			if (EQUAL_MAC_ADDR(aucIPv6Mac,
+				prBssInfo->aucOwnMacAddr)) {
+				kalPrint("Drop FORGED IPv6 packet\n");
+				return TRUE;
+			}
+		}
+#endif
+	}
+
+	return FALSE;
+}
+#endif
+
 u_int8_t hs20IsUnsecuredFrame(IN struct ADAPTER *prAdapter,
 		IN struct BSS_INFO *prBssInfo, IN struct SW_RFB *prCurrSwRfb)
 {
@@ -444,6 +544,10 @@ u_int8_t hs20IsUnsecuredFrame(IN struct ADAPTER *prAdapter,
 	kalPrint("\n");
 #endif
 
+#if CFG_ENABLE_GTK_FRAME_FILTER
+	if (hs20IsForgedGTKFrame(prAdapter, prBssInfo, prCurrSwRfb))
+		return TRUE;
+#endif
 	if (*pu2PktIpVer == htons(ETH_P_ARP))
 		return hs20IsGratuitousArp(prAdapter, prCurrSwRfb);
 	else if (*pu2PktIpVer == htons(ETH_P_IPV6))
@@ -489,4 +593,39 @@ u_int8_t hs20IsFrameFilterEnabled(IN struct ADAPTER *prAdapter,
 	/* For Now, always return true to run hs20 check even for legacy AP */
 	return TRUE;
 }
+
+uint32_t hs20SetBssidPool(IN struct ADAPTER *prAdapter,
+		IN void *pvBuffer,
+		IN uint8_t ucBssIndex)
+{
+	struct PARAM_HS20_SET_BSSID_POOL *prParamBssidPool =
+		(struct PARAM_HS20_SET_BSSID_POOL *) pvBuffer;
+	struct HS20_INFO *prHS20Info;
+	uint8_t ucIdx;
+
+	prHS20Info = aisGetHS20Info(prAdapter, ucBssIndex);
+
+	pr_info("[%s]Set Bssid Pool! enable[%d] num[%d]\n",
+		__func__, prParamBssidPool->fgIsEnable,
+		prParamBssidPool->ucNumBssidPool);
+
+	for (ucIdx = 0; ucIdx < prParamBssidPool->ucNumBssidPool; ucIdx++) {
+		COPY_MAC_ADDR(
+			prHS20Info->arBssidPool[ucIdx].aucBSSID,
+			&prParamBssidPool->arBSSID[ucIdx]);
+
+		pr_info("[%s][%d][" MACSTR "]\n",
+			__func__, ucIdx,
+			MAC2STR(prHS20Info->arBssidPool[ucIdx].aucBSSID));
+	}
+	prHS20Info->fgIsHS2SigmaMode = prParamBssidPool->fgIsEnable;
+	prHS20Info->ucNumBssidPoolEntry = prParamBssidPool->ucNumBssidPool;
+
+#if 0
+	wlanClearScanningResult(prAdapter);
+#endif
+
+	return WLAN_STATUS_SUCCESS;
+}
+
 #endif /* CFG_SUPPORT_PASSPOINT */

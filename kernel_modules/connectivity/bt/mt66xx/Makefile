@@ -108,3 +108,4 @@ ccs:
 	./util/checkpatch.pl -f btmtk_buffer_mode.c
 	./util/checkpatch.pl -f btmtk_woble.c
 	./util/checkpatch.pl -f btmtk_chip_reset.c
+

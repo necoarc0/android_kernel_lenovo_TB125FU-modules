@@ -84,3 +84,4 @@ struct btmtk_buffer_mode_struct {
 int btmtk_buffer_mode_send(struct btmtk_buffer_mode_struct *buffer_mode);
 void btmtk_buffer_mode_initialize(struct btmtk_dev *bdev, struct btmtk_buffer_mode_struct **buffer_mode);
 #endif /* __BTMTK_BUFFER_MODE_H__ */
+

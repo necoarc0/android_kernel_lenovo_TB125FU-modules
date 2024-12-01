@@ -1,15 +1,8 @@
-/* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2015 MediaTek Inc.
+ */
 
-/*
- * Copyright (c) 2020 MediaTek Inc.
- */
-/*
- * SHA-256 hash implementation and interface functions
- * Copyright (c) 2003-2012, Jouni Malinen <j@w1.fi>
- *
- * This software may be distributed under the terms of the BSD license.
- * See README for more details.
- */
 
 #include "wpa_supp/FourWayHandShake.h"
 
@@ -42,11 +35,6 @@ hmac_sha256_vector(const u8 *key, size_t key_len, size_t num_elem,
 	int ret = 0;
 
 	k_pad = os_zalloc(64);
-
-	if (!k_pad) {
-		DBGLOG(NAN, ERROR, "k_pad is null!\n");
-		return -1;
-	}
 	tk = os_zalloc(32);
 
 	if (num_elem > 5) {
@@ -140,7 +128,7 @@ hmac_sha256(const u8 *key, size_t key_len, const u8 *data, size_t data_len,
 void caculate_pmkid(u8 *key, u8 *IMAC, u8 *RMAC, u8 *serviceName, u8 *pmkid)
 {
 	char *pmkName = "NAN PMK Name";
-	struct nan_rdf_sha256_state r_SHA_256_state;
+	struct sha256_state r_SHA_256_state;
 	u8  auc_tk[32];
 	u8 aucServiceID[6];
 	int pmkIdSrcLen = strlen(pmkName) + 6+6+6;
@@ -148,18 +136,11 @@ void caculate_pmkid(u8 *key, u8 *IMAC, u8 *RMAC, u8 *serviceName, u8 *pmkid)
 	int i = 0;
 	int post = 0;
 
-	os_memset(auc_tk, 0, sizeof(auc_tk));
-
-	if (!pmkIdSrc) {
-		DBGLOG(NAN, ERROR, "pmkIdSrc is null!\n");
-		return;
-	}
-
 	for (i = 0; i < strlen(serviceName); i++) {
 		if ((serviceName[i] >= 'A') && (serviceName[i] <= 'Z'))
 			serviceName[i] =  serviceName[i] + 32;
 	}
-	nan_rdf_sha256_init(&r_SHA_256_state);
+	sha256_init(&r_SHA_256_state);
 	sha256_process(&r_SHA_256_state, serviceName, strlen(serviceName));
 	sha256_done(&r_SHA_256_state, auc_tk);
 	os_memcpy(aucServiceID, auc_tk, 6);

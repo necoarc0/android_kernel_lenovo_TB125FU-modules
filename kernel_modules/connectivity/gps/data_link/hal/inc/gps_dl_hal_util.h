@@ -24,3 +24,4 @@ enum GDL_RET_STATUS gps_dl_hwcr_access_disclaim(enum GPS_DL_HWCR_OWNER_ENUM owne
 
 
 #endif /* _GPS_DL_HAL_UTIL_H */
+

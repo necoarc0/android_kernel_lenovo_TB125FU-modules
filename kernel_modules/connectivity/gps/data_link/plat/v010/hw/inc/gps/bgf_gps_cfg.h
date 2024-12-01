@@ -20,3 +20,4 @@
 #define BGF_GPS_CFG_BGF_IP_CONFIG_BGFSYS_CONFIG_SHFT           0
 
 #endif /* __BGF_GPS_CFG_REGS_H__ */
+

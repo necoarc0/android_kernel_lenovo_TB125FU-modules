@@ -2456,6 +2456,8 @@ struct fm *fm_dev_init(unsigned int arg)
 		goto ERR_EXIT;
 	}
 
+	g_fm_struct = fm;
+
 	fm->timer_wkthd = fm_workthread_create("fm_timer_wq");
 
 	if (!fm->timer_wkthd) {
@@ -2559,8 +2561,6 @@ struct fm *fm_dev_init(unsigned int arg)
 /* fm_timer_sys->init(fm_timer_sys, fm_timer_func, (unsigned long)g_fm_struct, fm_low_ops.ri.rds_bci_get(), 0); */
 /* fm_timer_sys->start(fm_timer_sys); */
 	fm_cust_config_setting();
-
-	g_fm_struct = fm;
 
 	return g_fm_struct;
 

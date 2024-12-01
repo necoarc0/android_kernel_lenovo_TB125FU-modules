@@ -1,7 +1,8 @@
-/* SPDX-License-Identifier: GPL-2.0 */  
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2016,2017 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  */
+
 
 #ifndef __BTMTK_DEFINE_H__
 #define __BTMTK_DEFINE_H__
@@ -31,18 +32,11 @@
 
 #include <linux/kthread.h>
 #include <linux/freezer.h>
-#include <linux/vmalloc.h>
-#include <linux/rtc.h>
 
 /** Driver version */
-#define VERSION "7.0.2022031401"
+#define VERSION "7.0.2020121701"
 #define SUBVER ":turnkey"
 
-#ifdef CFG_SUPPORT_WAKEUP_IRQ
-#define WAKEUP_BT_IRQ 1
-#else
-#define WAKEUP_BT_IRQ 0
-#endif
 
 #define ENABLESTP FALSE
 #define BTMTKUART_TX_STATE_ACTIVE	1
@@ -111,7 +105,6 @@
 #define HCI_SNOOP_ENTRY_NUM	30
 #define HCI_SNOOP_BUF_SIZE	32
 #define HCI_SNOOP_MAX_BUF_SIZE	66
-#define HCI_SNOOP_TS_STR_LEN	24
 #define WMT_OVER_HCI_HEADER_SIZE	3
 #define READ_ISO_PACKET_CMD_SIZE	4
 
@@ -126,12 +119,6 @@ extern uint8_t btmtk_log_lvl;
 #define BTMTK_DBG(fmt, ...)	 \
 	do { if (btmtk_log_lvl >= BTMTK_LOG_LVL_DBG) pr_info("[btmtk_dbg] "fmt"\n", ##__VA_ARGS__); } while (0)
 
-#define BTMTK_WARN_LIMITTED(fmt, ...)	\
-	do { \
-		if (btmtk_log_lvl >= BTMTK_LOG_LVL_WARN)	\
-			pr_info("[btmtk_warn_limit] "fmt"\n", ##__VA_ARGS__);	\
-	} while (0)
-
 #define BTMTK_INFO_RAW(p, l, fmt, ...)						\
 	do {	\
 		if (btmtk_log_lvl >= BTMTK_LOG_LVL_INFO) {	\
@@ -139,8 +126,12 @@ extern uint8_t btmtk_log_lvl;
 			int len_ = (l <= HCI_SNOOP_MAX_BUF_SIZE ? l : HCI_SNOOP_MAX_BUF_SIZE);	\
 			uint8_t raw_buf[HCI_SNOOP_MAX_BUF_SIZE * 5 + 10];	\
 			const unsigned char *ptr = p;	\
-			for (cnt_ = 0; cnt_ < len_; ++cnt_)	\
-				(void)snprintf(raw_buf+5*cnt_, 6, "0x%02X ", ptr[cnt_]);	\
+			for (cnt_ = 0; cnt_ < len_; ++cnt_) {	\
+				if (snprintf(raw_buf+5*cnt_, 6, "0x%02X ", ptr[cnt_]) < 0) {	\
+					pr_info("snprintf error\n");	\
+					break;	\
+				}	\
+			}	\
 			raw_buf[5*cnt_] = '\0';	\
 			if (l <= HCI_SNOOP_MAX_BUF_SIZE) {	\
 				pr_cont("[btmtk_info] "fmt"%s\n", ##__VA_ARGS__, raw_buf);	\
@@ -157,8 +148,12 @@ extern uint8_t btmtk_log_lvl;
 			int len_ = (l <= HCI_SNOOP_MAX_BUF_SIZE ? l : HCI_SNOOP_MAX_BUF_SIZE);	\
 			uint8_t raw_buf[HCI_SNOOP_MAX_BUF_SIZE * 5 + 10];	\
 			const unsigned char *ptr = p;	\
-			for (cnt_ = 0; cnt_ < len_; ++cnt_)	\
-				(void)snprintf(raw_buf+5*cnt_, 6, "0x%02X ", ptr[cnt_]);	\
+			for (cnt_ = 0; cnt_ < len_; ++cnt_) {	\
+				if (snprintf(raw_buf+5*cnt_, 6, "0x%02X ", ptr[cnt_]) < 0) {	\
+					pr_info("snprintf error\n");	\
+					break;	\
+				}	\
+			}	\
 			raw_buf[5*cnt_] = '\0';	\
 			if (l <= HCI_SNOOP_MAX_BUF_SIZE) {	\
 				pr_cont("[btmtk_debug] "fmt"%s\n", ##__VA_ARGS__, raw_buf);	\
@@ -203,7 +198,7 @@ extern uint8_t btmtk_log_lvl;
 /* TODO, If usb use 901 patch unit size, download patch will timeout
  * because the timeout has been set to 1s
  */
-#define UPLOAD_PATCH_UNIT	1988
+#define UPLOAD_PATCH_UNIT	2048
 #define PATCH_INFO_SIZE		30
 /*#endif*/
 #define PATCH_PHASE1		1
@@ -227,11 +222,8 @@ extern uint8_t btmtk_log_lvl;
 #define PHASE1_WMT_CMD_COUNT 255
 #define VENDOR_CMD_COUNT 255
 
+
 #define BT_CFG_NAME "bt.cfg"
-#define BT_CFG_NAME_PREFIX "bt_mt"
-#define BT_CFG_NAME_SUFFIX "cfg"
-#define WOBLE_CFG_NAME_PREFIX "woble_setting"
-#define WOBLE_CFG_NAME_SUFFIX "bin"
 #define BT_UNIFY_WOBLE "SUPPORT_UNIFY_WOBLE"
 #define BT_UNIFY_WOBLE_TYPE "UNIFY_WOBLE_TYPE"
 #define BT_WOBLE_BY_EINT "SUPPORT_WOBLE_BY_EINT"
@@ -248,16 +240,9 @@ extern uint8_t btmtk_log_lvl;
 #define BT_PHASE1_WMT_CMD "PHASE1_WMT_CMD"
 #define BT_VENDOR_CMD "VENDOR_CMD"
 #define BT_SINGLE_SKU "SUPPORT_BT_SINGLE_SKU"
-#define BT_AUDIO_SET "SUPPORT_BT_AUDIO_SETTING"
-#define BT_AUDIO_ENABLE_CMD "AUDIO_ENABLE_CMD"
-#define BT_AUDIO_PINMUX_NUM "AUDIO_PINMUX_NUM"
-#define BT_AUDIO_PINMUX_MODE "AUDIO_PINMUX_MODE"
+
 
 #define PM_KEY_BTW (0x0015) /* Notify PM the unify woble type */
-
-#define BTMTK_RESET_DOING 1
-#define BTMTK_RESET_DONE 0
-#define BTMTK_MAX_SUBSYS_RESET_COUNT 3
 
 /**
  * Disable RESUME_RESUME
@@ -294,39 +279,10 @@ struct bt_cfg_struct {
 	struct fw_cfg_struct phase1_wmt_cmd[PHASE1_WMT_CMD_COUNT];
 	struct fw_cfg_struct vendor_cmd[VENDOR_CMD_COUNT];
 	bool	support_bt_single_sku;
-	bool	support_audio_setting;			/* support audio set pinmux */
-	struct fw_cfg_struct audio_cmd;	/* support on audio enable command customization */
-	struct fw_cfg_struct audio_pinmux_num;	/* support on set audio pinmux num command customization */
-	struct fw_cfg_struct audio_pinmux_mode;	/* support on set audio pinmux mode command customization */
 };
 
-struct bt_utc_struct {
-	struct rtc_time tm;
-	u32 usec;
-};
-
-#define BT_DOWNLOAD	1
-#define WIFI_DOWNLOAD	2
-#define ZB_DOWNLOAD	3
-
-enum debug_reg_index_len {
-	DEBUG_REG_INX_LEN_NONE = 0,
-	DEBUG_REG_INX_LEN_2 = 2,
-	DEBUG_REG_INX_LEN_3 = 3,
-};
-
-#define DEBUG_REG_SIZE	10
-#define DEBUG_REG_NUM	10
-
-struct debug_reg {
-	u32	*content;
-	u32	length;
-};
-
-struct debug_reg_struct {
-	struct debug_reg	*reg;
-	u32	num;
-};
+#define WIFI_DOWNLOAD	TRUE
+#define BT_DOWNLOAD	FALSE
 
 #define SWAP32(x) \
 	((u32) (\
@@ -352,30 +308,5 @@ struct debug_reg_struct {
 #define CHIP_ID	0x70010200
 #define FLAVOR	0x70010020
 
-
-#ifndef DEBUG_LD_PATCH_TIME
-#define DEBUG_LD_PATCH_TIME 0
-#endif
-
-#ifndef DEBUG_DUMP_TIME
-#define DEBUG_DUMP_TIME 0
-#endif
-
-#define ERRNUM 0xFF
-
-#if DEBUG_DUMP_TIME
-void btmtk_getUTCtime(struct bt_utc_struct *utc);
-#define DUMP_TIME_STAMP(__str) \
-	do { \
-		struct bt_utc_struct utc; \
-		btmtk_getUTCtime(&utc); \
-		BTMTK_INFO("%s:%d, %s - DUMP_TIME_STAMP UTC: %d-%02d-%02d %02d:%02d:%02d.%06u", \
-			__func__, __LINE__, __str, \
-			utc.tm.tm_year, utc.tm.tm_mon, utc.tm.tm_mday, \
-			utc.tm.tm_hour, utc.tm.tm_min, utc.tm.tm_sec, utc.usec); \
-	} while (0)
-#else
-#define DUMP_TIME_STAMP(__str)
-#endif
 
 #endif /* __BTMTK_DEFINE_H__ */

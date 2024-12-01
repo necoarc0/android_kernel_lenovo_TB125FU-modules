@@ -1,54 +1,7 @@
-/*******************************************************************************
- *
- * This file is provided under a dual license.  When you use or
- * distribute this software, you may choose to be licensed under
- * version 2 of the GNU General Public License ("GPLv2 License")
- * or BSD License.
- *
- * GPLv2 License
- *
- * Copyright(C) 2016 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * BSD LICENSE
- *
- * Copyright(C) 2016 MediaTek Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- ******************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2016 MediaTek Inc.
+ */
 /*
  ** Id: //Department/DaVinci/BRANCHES/MT6620_WIFI_DRIVER_V2_3/os/linux
  *      /gl_init.c#11
@@ -88,12 +41,12 @@
 #endif
 #include "gl_vendor.h"
 #include "gl_hook_api.h"
-#include "mddp.h"
+
+#if CFG_POWER_OFF_CTRL_SUPPORT
+#include <linux/reboot.h>
+#endif
 #if CFG_SUPPORT_NAN
 #include "gl_vendor_ndp.h"
-#endif
-#if (CFG_SUPPORT_CONNINFRA == 1)
-#include "fw_log_wifi.h"
 #endif
 
 /*******************************************************************************
@@ -103,15 +56,35 @@
 /* #define MAX_IOREQ_NUM   10 */
 struct semaphore g_halt_sem;
 int g_u4HaltFlag;
-int g_u4WlanInitFlag;
-enum ENUM_NVRAM_STATE g_NvramFsm = NVRAM_STATE_INIT;
+atomic_t g_wlanRemoving;
+static enum ENUM_NVRAM_STATE g_NvramFsm = NVRAM_STATE_INIT;
 
 uint8_t g_aucNvram[MAX_CFG_FILE_WIFI_REC_SIZE];
-uint8_t g_aucNvram_OnlyPreCal[MAX_CFG_FILE_WIFI_RECAL_SIZE];
 struct wireless_dev *gprWdev[KAL_AIS_NUM];
+#if CFG_REDIRECT_OID_SUPPORT
+struct delayed_work oid_workq;
+#endif
+
+#if (CFG_SUPPORT_SUPPLICANT_SME == 1)
+#if CFG_SUPPORT_CFG80211_QUEUE
+struct delayed_work cfg80211_workq;
+#endif
+#endif
 
 #if CFG_SUPPORT_PERSIST_NETDEV
 struct net_device *gprNetdev[KAL_AIS_NUM] = {};
+#endif
+
+#if CFG_AP_80211KVR_INTERFACE
+#define NETLINK_OSS_KERNEL 25
+struct sock *nl_sk;
+#endif/* CFG_AP_80211KVR_INTERFACE */
+
+/* fos_change begin */
+#if IS_ENABLED(CONFIG_IDME)
+#define IDME_OF_MAC_ADDR	"/idme/mac_addr"
+#define IDME_OF_BOARD_ID	"/idme/board_id"
+static char idme_board_id[17];
 #endif
 /*******************************************************************************
  *                             D A T A   T Y P E S
@@ -132,9 +105,10 @@ struct WLANDEV_INFO {
 
 MODULE_AUTHOR(NIC_AUTHOR);
 MODULE_DESCRIPTION(NIC_DESC);
+#if KERNEL_VERSION(5, 12, 0) > LINUX_VERSION_CODE
 MODULE_SUPPORTED_DEVICE(NIC_NAME);
+#endif
 
-/* MODULE_LICENSE("MTK Propietary"); */
 MODULE_LICENSE("Dual BSD/GPL");
 
 #ifdef CFG_DRIVER_INF_NAME_CHANGE
@@ -198,10 +172,131 @@ unsigned long long gConEmiSize;
 EXPORT_SYMBOL(gConEmiSize);
 #endif
 
-#if CFG_MTK_ANDROID_EMI
-phys_addr_t gConEmiPhyBaseFinal;
-unsigned long long gConEmiSizeFinal;
+/*  For DTV Ref project -> Default enable */
+#if CFG_DC_USB_WOW_CALLBACK || CFG_POWER_OFF_CTRL_SUPPORT
+/* Register  DC  wow callback */
+int kalDcSetWow(void)
+{
+	struct GLUE_INFO *prGlueInfo = NULL;
+	struct BUS_INFO *prBusInfo = NULL;
+	struct WIFI_VAR *prWifiVar = NULL;
+	uint32_t count = 0;
+	int ret = 0;
+#if !CFG_ENABLE_WAKE_LOCK
+	uint32_t rStatus = WLAN_STATUS_SUCCESS;
+	uint32_t u4BufLen;
+
+	GLUE_SPIN_LOCK_DECLARATION();
 #endif
+
+	prGlueInfo = (struct GLUE_INFO *) wiphy_priv(wlanGetWiphy());
+
+	if (!prGlueInfo) {
+		DBGLOG(INIT, ERROR, "prGlueInfo == NULL\n");
+		return -ENODEV;
+	}
+
+	if (!prGlueInfo->prAdapter) {
+		DBGLOG(INIT, ERROR, "prGlueInfo->prAdapter == NULL\n");
+		return -ENODEV;
+	}
+
+	if (prGlueInfo && prGlueInfo->prAdapter) {
+		prWifiVar = &prGlueInfo->prAdapter->rWifiVar;
+
+#if !CFG_ENABLE_WAKE_LOCK
+		if (IS_FEATURE_ENABLED(prWifiVar->ucWow)) {
+			GLUE_ACQUIRE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
+			if (prGlueInfo->prScanRequest) {
+				kalCfg80211ScanDone(prGlueInfo->prScanRequest,
+					TRUE);
+				prGlueInfo->prScanRequest = NULL;
+			}
+			GLUE_RELEASE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
+
+			/* AIS flow: disassociation if wow_en=0 */
+			DBGLOG(REQ, INFO, "Enter AIS pre-suspend\n");
+			rStatus = kalIoctl(prGlueInfo,
+						wlanoidAisPreSuspend,
+						NULL,
+						0,
+						TRUE,
+						FALSE,
+						TRUE,
+						&u4BufLen);
+
+			/* TODO: p2pProcessPreSuspendFlow
+			 * In current design, only support AIS connection
+			 * during suspend only.
+			 * It need to add flow to deactive P2P (GC/GO)
+			 * link during suspend flow.
+			 * Otherwise, MT7668 would fail to enter deep sleep.
+			 */
+		}
+#endif
+
+		set_bit(SUSPEND_FLAG_FOR_WAKEUP_REASON,
+			&prGlueInfo->prAdapter->ulSuspendFlag);
+		set_bit(SUSPEND_FLAG_CLEAR_WHEN_RESUME,
+			&prGlueInfo->prAdapter->ulSuspendFlag);
+	}
+
+	prGlueInfo->fgIsInSuspendMode = TRUE;
+
+	/* Stop upper layers calling the device hard_start_xmit routine. */
+	netif_tx_stop_all_queues(prGlueInfo->prDevHandler);
+
+	/* wait wiphy device do cfg80211 suspend done, then start hif suspend */
+	if (IS_FEATURE_ENABLED(prGlueInfo->prAdapter->rWifiVar.ucWow))
+		wlanWaitCfg80211SuspendDone(prGlueInfo);
+
+	/* change to pre-Suspend state & block cfg80211 ops */
+	glUsbSetState(&prGlueInfo->rHifInfo, USB_STATE_PRE_SUSPEND);
+
+#if CFG_CHIP_RESET_SUPPORT
+	if (prGlueInfo->prAdapter->chip_info->fgIsSupportL0p5Reset)
+		flush_work(&prGlueInfo->rWfsysResetWork);
+#endif
+
+	wlanSuspendPmHandle(prGlueInfo);
+
+	prBusInfo = prGlueInfo->prAdapter->chip_info->bus_info;
+	if (prBusInfo->asicUsbSuspend) {
+		if (prBusInfo->asicUsbSuspend(prGlueInfo->prAdapter,
+			prGlueInfo))
+			return 0;
+		else
+			return -1;
+	}
+
+	halUSBPreSuspendCmd(prGlueInfo->prAdapter);
+
+	while (prGlueInfo->rHifInfo.state != USB_STATE_SUSPEND) {
+		if (count > 250) {
+			DBGLOG(HAL, ERROR, "pre_suspend timeout\n");
+			ret = -EFAULT;
+			break;
+		}
+		mdelay(2);
+		count++;
+	}
+
+	glUsbSetState(&prGlueInfo->rHifInfo, USB_STATE_SUSPEND);
+	halDisableInterrupt(prGlueInfo->prAdapter);
+	halTxCancelAllSending(prGlueInfo->prAdapter);
+
+	/* pending cmd will be kept in queue
+	 * and no one to handle it after HIF resume.
+	 * In STR, it will result in cmd buf full and then cmd buf alloc fail .
+	 */
+	if (IS_FEATURE_ENABLED(prGlueInfo->prAdapter->rWifiVar.ucWow))
+		wlanReleaseAllTxCmdQueue(prGlueInfo->prAdapter);
+
+	DBGLOG(HAL, STATE, "mtk_usb_suspend() done!\n");
+	return ret;
+}
+#endif
+
 
 int CFG80211_Suspend(struct wiphy *wiphy,
 		     struct cfg80211_wowlan *wow)
@@ -223,29 +318,15 @@ int CFG80211_Resume(struct wiphy *wiphy)
  *******************************************************************************
  */
 
-#if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
-	#define CHAN2G(_channel, _freq, _flags)		\
-	{						\
-		.band               = KAL_BAND_2GHZ,	\
-		.center_freq        = (_freq),		\
-		.freq_offset        = 0,		\
-		.hw_value           = (_channel),	\
-		.flags              = (_flags),		\
-		.max_antenna_gain   = 0,		\
-		.max_power          = 30,		\
-	}
-#else
-	#define CHAN2G(_channel, _freq, _flags)		\
-	{						\
-		.band               = KAL_BAND_2GHZ,	\
-		.center_freq        = (_freq),		\
-		.hw_value           = (_channel),	\
-		.flags              = (_flags),		\
-		.max_antenna_gain   = 0,		\
-		.max_power          = 30,		\
-	}
-#endif
-
+#define CHAN2G(_channel, _freq, _flags)		\
+{						\
+	.band               = KAL_BAND_2GHZ,	\
+	.center_freq        = (_freq),		\
+	.hw_value           = (_channel),	\
+	.flags              = (_flags),		\
+	.max_antenna_gain   = 0,		\
+	.max_power          = 30,		\
+}
 static struct ieee80211_channel mtk_2ghz_channels[] = {
 	CHAN2G(1, 2412, 0),
 	CHAN2G(2, 2417, 0),
@@ -263,46 +344,17 @@ static struct ieee80211_channel mtk_2ghz_channels[] = {
 	CHAN2G(14, 2484, 0),
 };
 
-#if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
-	#define CHAN5G(_channel, _flags)			\
-	{							\
-		.band              = KAL_BAND_5GHZ,		\
-		.center_freq       =				\
-			(((_channel >= 182) && (_channel <= 196)) ? \
-			(4000 + (5 * (_channel))) : (5000 + (5 * (_channel)))),\
-		.freq_offset       = 0,				\
-		.hw_value          = (_channel),		\
-		.flags             = (_flags),			\
-		.max_antenna_gain  = 0,				\
-		.max_power         = 30,			\
-	}
-#else
-	#define CHAN5G(_channel, _flags)			\
-	{							\
-		.band              = KAL_BAND_5GHZ,		\
-		.center_freq       =				\
-			(((_channel >= 182) && (_channel <= 196)) ? \
-			(4000 + (5 * (_channel))) : (5000 + (5 * (_channel)))),\
-		.hw_value          = (_channel),		\
-		.flags             = (_flags),			\
-		.max_antenna_gain  = 0,				\
-		.max_power         = 30,			\
-	}
-#endif
-
-#if (CFG_SUPPORT_WIFI_6G == 1)
-#define CHAN6G(_channel, _flags)				\
-{								\
-	.band               = KAL_BAND_6GHZ,			\
-	.center_freq        = (5950 + (5 * (_channel))),	\
-	.freq_offset        = 0,				\
-	.hw_value           = (_channel),			\
-	.flags              = (_flags),				\
-	.max_antenna_gain   = 0,				\
-	.max_power          = 30,				\
+#define CHAN5G(_channel, _flags)					\
+{									\
+	.band               = KAL_BAND_5GHZ,				\
+	.center_freq        =						\
+		(((_channel >= 182) && (_channel <= 196)) ?		\
+		(4000 + (5 * (_channel))) : (5000 + (5 * (_channel)))),	\
+	.hw_value           = (_channel),				\
+	.flags              = (_flags),					\
+	.max_antenna_gain   = 0,					\
+	.max_power          = 30,					\
 }
-#endif
-
 static struct ieee80211_channel mtk_5ghz_channels[] = {
 	/* UNII-1 */
 	CHAN5G(36, 0),
@@ -336,6 +388,16 @@ static struct ieee80211_channel mtk_5ghz_channels[] = {
 };
 
 #if (CFG_SUPPORT_WIFI_6G == 1)
+#define CHAN6G(_channel, _flags)					\
+{									\
+	.band               = KAL_BAND_6GHZ,                \
+	.center_freq        = (5950 + (5 * (_channel))),    \
+	.hw_value           = (_channel),               \
+	.flags              = (_flags),                 \
+	.max_antenna_gain   = 0,                    \
+	.max_power          = 30,                   \
+}
+
 static struct ieee80211_channel mtk_6ghz_channels[] = {
 	/* UNII-5 */
 	CHAN6G(1, 0),
@@ -401,6 +463,41 @@ static struct ieee80211_channel mtk_6ghz_channels[] = {
 	CHAN6G(229, 0),
 	CHAN6G(233, 0)
 };
+
+#if KERNEL_VERSION(4, 19, 0) <= LINUX_VERSION_CODE
+#define HE_MCS_SUPP_2SS 0xFFFA
+#define HE_MCS_DONOT_SUPP 0xFFFF
+
+#define HE_MCS_NSS_SUPP						\
+{								\
+	.rx_mcs_80 = CPU_TO_LE16(HE_MCS_SUPP_2SS),		\
+	.tx_mcs_80 = CPU_TO_LE16(HE_MCS_SUPP_2SS),		\
+	.rx_mcs_160 = CPU_TO_LE16(HE_MCS_DONOT_SUPP),		\
+	.tx_mcs_160 = CPU_TO_LE16(HE_MCS_DONOT_SUPP),		\
+	.rx_mcs_80p80 = CPU_TO_LE16(HE_MCS_DONOT_SUPP),		\
+	.tx_mcs_80p80 = CPU_TO_LE16(HE_MCS_DONOT_SUPP),		\
+}
+
+#define WLAN_HE_CAP						\
+{								\
+	.has_he        = true,					\
+	.he_mcs_nss_supp = HE_MCS_NSS_SUPP,			\
+}
+
+#define IFTYPE6G(_maskbit)					\
+{								\
+	.types_mask         = BIT(_maskbit),			\
+	.he_cap             = WLAN_HE_CAP,			\
+}
+
+static struct ieee80211_sband_iftype_data mtk_6ghz_iftype_data[] = {
+	IFTYPE6G(IFTYPE_STATION),
+	IFTYPE6G(IFTYPE_AP),
+	IFTYPE6G(IFTYPE_P2P_CLIENT),
+	IFTYPE6G(IFTYPE_P2P_GO)
+};
+#endif
+
 #endif
 
 #define RATETAB_ENT(_rate, _rateid, _flags)	\
@@ -446,6 +543,7 @@ static struct ieee80211_rate mtk_rates[] = {
 	.tx_highest     = cpu_to_le16(867),			\
 }
 
+
 #define WLAN_HT_CAP						\
 {								\
 	.ht_supported   = true,					\
@@ -463,133 +561,15 @@ static struct ieee80211_rate mtk_rates[] = {
 {									\
 	.vht_supported  = true,						\
 	.cap            = IEEE80211_VHT_CAP_RXLDPC			\
-		| IEEE80211_VHT_CAP_SUPP_CHAN_WIDTH_160_80PLUS80MHZ	\
-			| IEEE80211_VHT_CAP_MAX_MPDU_LENGTH_11454	\
-			| IEEE80211_VHT_CAP_RXLDPC			\
-			| IEEE80211_VHT_CAP_SHORT_GI_80			\
-			| IEEE80211_VHT_CAP_TXSTBC			\
-			| IEEE80211_VHT_CAP_SU_BEAMFORMER_CAPABLE	\
-			| IEEE80211_VHT_CAP_SU_BEAMFORMEE_CAPABLE,	\
-	.vht_mcs        = WLAN_VHT_MCS_INFO,				\
-}
-
-#define WLAN_VHT_CAP_160	\
-{									\
-	.vht_supported  = true,						\
-	.cap            = IEEE80211_VHT_CAP_RXLDPC			\
 			| IEEE80211_VHT_CAP_SUPP_CHAN_WIDTH_MASK	\
 			| IEEE80211_VHT_CAP_MAX_MPDU_LENGTH_11454	\
 			| IEEE80211_VHT_CAP_RXLDPC			\
 			| IEEE80211_VHT_CAP_SHORT_GI_80			\
 			| IEEE80211_VHT_CAP_TXSTBC			\
-			| IEEE80211_VHT_CAP_SUPP_CHAN_WIDTH_160MHZ \
-			| IEEE80211_VHT_CAP_EXT_NSS_BW_MASK \
 			| IEEE80211_VHT_CAP_SU_BEAMFORMER_CAPABLE	\
 			| IEEE80211_VHT_CAP_SU_BEAMFORMEE_CAPABLE,	\
 	.vht_mcs        = WLAN_VHT_MCS_INFO,				\
 }
-
-#if KERNEL_VERSION(4, 19, 0) <= CFG80211_VERSION_CODE
-#if (CFG_SUPPORT_802_11AX == 1)
-
-#define WLAN_HE_CAP_ELEM_INFO					\
-{								\
-	.mac_cap_info[0] =					\
-		IEEE80211_HE_MAC_CAP0_HTC_HE,			\
-	.mac_cap_info[3] =					\
-		IEEE80211_HE_MAC_CAP3_OMI_CONTROL,		\
-	.phy_cap_info[0] =					\
-		IEEE80211_HE_PHY_CAP0_CHANNEL_WIDTH_SET_40MHZ_80MHZ_IN_5G,    \
-}
-
-#define WLAN_HE_CAP_160_ELEM_INFO					\
-{								\
-	.mac_cap_info[0] =					\
-		IEEE80211_HE_MAC_CAP0_HTC_HE,			\
-	.mac_cap_info[3] =					\
-		IEEE80211_HE_MAC_CAP3_OMI_CONTROL,		\
-	.phy_cap_info[0] =					\
-		IEEE80211_HE_PHY_CAP0_CHANNEL_WIDTH_SET_40MHZ_80MHZ_IN_5G    \
-		| IEEE80211_HE_PHY_CAP0_CHANNEL_WIDTH_SET_160MHZ_IN_5G,    \
-}
-
-#define WLAN_HE_MCS_NSS_SUPP_INFO				\
-{								\
-	.rx_mcs_80 = cpu_to_le16(0xFFFA),			\
-	.tx_mcs_80 = cpu_to_le16(0xFFFA),			\
-}
-
-#define WLAN_HE_CAP_INFO					\
-{								\
-	.has_he = true,						\
-	.he_cap_elem = WLAN_HE_CAP_ELEM_INFO,			\
-	.he_mcs_nss_supp = WLAN_HE_MCS_NSS_SUPP_INFO,		\
-}
-
-#define WLAN_HE_CAP_160_INFO					\
-{								\
-	.has_he = true,						\
-	.he_cap_elem = WLAN_HE_CAP_160_ELEM_INFO,			\
-	.he_mcs_nss_supp = WLAN_HE_MCS_NSS_SUPP_INFO,		\
-}
-
-static struct ieee80211_sband_iftype_data mtk_he_cap[] = {
-	{
-		.types_mask =
-			BIT(NL80211_IFTYPE_STATION) | BIT(NL80211_IFTYPE_AP),
-#if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
-		.he_cap = WLAN_HE_CAP_160_INFO,
-#else
-		.he_cap = WLAN_HE_CAP_INFO,
-#endif
-	},
-};
-
-#endif
-#endif
-
-#if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
-#if (CFG_SUPPORT_802_11AX == 1) && (CFG_SUPPORT_WIFI_6G == 1)
-
-#define HE_6GHZ_MIN_MPDU_START_SPACE		0
-#define HE_6GHZ_MAX_AMPUD_LEN_EXP		7
-#define HE_6GHZ_MAX_MPDU			2
-
-#define HE_6GHZ_BAND_CAP_MIN_MPDU_START              (BIT(0) | BIT(1) | BIT(2))
-#define HE_6GHZ_BAND_CAP_MAX_AMPDU_LEN_EXP_MASK      (BIT(3) | BIT(4) | BIT(5))
-#define HE_6GHZ_BAND_CAP_MAX_AMPDU_LEN_EXP_SHIFT     3
-#define HE_6GHZ_BAND_CAP_MAX_MPDU_LEN_MASK           (BIT(6) | BIT(7))
-#define HE_6GHZ_BAND_CAP_MAX_MPDU_LEN_SHIFT	     6
-#define HE_6GHZ_BAND_CAP_SMPS_DISABLED               (BIT(9) | BIT(10))
-#define HE_6GHZ_BAND_CAP_RX_ANTPAT_CONS              BIT(12)
-#define HE_6GHZ_BAND_CAP_TX_ANTPAT_CONS              BIT(13)
-
-#define WLAN_HE_6G_CAP_INFO						\
-{									\
-	.capa = (HE_6GHZ_MIN_MPDU_START_SPACE &				\
-			HE_6GHZ_BAND_CAP_MIN_MPDU_START)		\
-		| ((HE_6GHZ_MAX_AMPUD_LEN_EXP <<			\
-			HE_6GHZ_BAND_CAP_MAX_AMPDU_LEN_EXP_SHIFT) &	\
-			HE_6GHZ_BAND_CAP_MAX_AMPDU_LEN_EXP_MASK)	\
-		| ((HE_6GHZ_MAX_MPDU <<					\
-			HE_6GHZ_BAND_CAP_MAX_MPDU_LEN_SHIFT) &		\
-			HE_6GHZ_BAND_CAP_MAX_MPDU_LEN_MASK)		\
-		| HE_6GHZ_BAND_CAP_SMPS_DISABLED			\
-		| HE_6GHZ_BAND_CAP_RX_ANTPAT_CONS			\
-		| HE_6GHZ_BAND_CAP_TX_ANTPAT_CONS,			\
-}
-
-static struct ieee80211_sband_iftype_data mtk_he_cap_6g[] = {
-	{
-		.types_mask =
-			BIT(NL80211_IFTYPE_STATION) | BIT(NL80211_IFTYPE_AP),
-		.he_cap = WLAN_HE_CAP_INFO,
-		.he_6ghz_capa = WLAN_HE_6G_CAP_INFO,
-	},
-};
-
-#endif /* (CFG_SUPPORT_802_11AX == 1) && (CFG_SUPPORT_WIFI_6G == 1) */
-#endif
 
 /* public for both Legacy Wi-Fi / P2P access */
 struct ieee80211_supported_band mtk_band_2ghz = {
@@ -599,12 +579,6 @@ struct ieee80211_supported_band mtk_band_2ghz = {
 	.bitrates = mtk_g_rates,
 	.n_bitrates = mtk_g_rates_size,
 	.ht_cap = WLAN_HT_CAP,
-#if KERNEL_VERSION(4, 19, 0) <= CFG80211_VERSION_CODE
-#if (CFG_SUPPORT_802_11AX == 1)
-	.n_iftype_data = 1,
-	.iftype_data = mtk_he_cap,
-#endif
-#endif
 };
 
 /* public for both Legacy Wi-Fi / P2P access */
@@ -615,32 +589,20 @@ struct ieee80211_supported_band mtk_band_5ghz = {
 	.bitrates = mtk_a_rates,
 	.n_bitrates = mtk_a_rates_size,
 	.ht_cap = WLAN_HT_CAP,
-#if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
-	.vht_cap = WLAN_VHT_CAP_160,
-#else
 	.vht_cap = WLAN_VHT_CAP,
-#endif
-#if KERNEL_VERSION(4, 19, 0) <= CFG80211_VERSION_CODE
-#if (CFG_SUPPORT_802_11AX == 1)
-	.n_iftype_data = 1,
-	.iftype_data = mtk_he_cap,
-#endif
-#endif
 };
 
-/* public for both Legacy Wi-Fi / P2P access */
 #if (CFG_SUPPORT_WIFI_6G == 1)
+/* public for both Legacy Wi-Fi / P2P access */
 struct ieee80211_supported_band mtk_band_6ghz = {
 	.band = KAL_BAND_6GHZ,
 	.channels = mtk_6ghz_channels,
 	.n_channels = ARRAY_SIZE(mtk_6ghz_channels),
 	.bitrates = mtk_a_rates,
 	.n_bitrates = mtk_a_rates_size,
-#if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
-#if (CFG_SUPPORT_802_11AX == 1)
-	.n_iftype_data = 1,
-	.iftype_data = mtk_he_cap_6g,
-#endif
+#if KERNEL_VERSION(4, 19, 0) <= LINUX_VERSION_CODE
+	.n_iftype_data = ARRAY_SIZE(mtk_6ghz_iftype_data),
+	.iftype_data = mtk_6ghz_iftype_data,
 #endif
 };
 #endif
@@ -655,12 +617,36 @@ const uint32_t mtk_cipher_suites[] = {
 	/* keep last -- depends on hw flags! */
 	WLAN_CIPHER_SUITE_AES_CMAC,
 	WLAN_CIPHER_SUITE_GCMP_256,
-	WLAN_CIPHER_SUITE_GCMP,
 	WLAN_CIPHER_SUITE_BIP_GMAC_256, /* TODO, HW not support,
 					* SW should handle integrity check
 					*/
 	WLAN_CIPHER_SUITE_NO_GROUP_ADDR
 };
+
+#if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
+const uint32_t mtk_akm_suites[] = {
+#if CFG_SUPPORT_802_11R
+	WLAN_AKM_SUITE_FT_8021X,
+	WLAN_AKM_SUITE_FT_PSK,
+#endif
+#if CFG_SUPPORT_802_11W
+	WLAN_AKM_SUITE_8021X_SHA256,
+	WLAN_AKM_SUITE_PSK_SHA256,
+#endif
+#if CFG_SUPPORT_OWE
+	WLAN_AKM_SUITE_OWE,
+#endif
+#if CFG_SUPPORT_DPP
+	WLAN_AKM_SUITE_WFA_DPP,
+#endif
+#if CFG_SUPPORT_SUPPLICANT_SME
+	WLAN_AKM_SUITE_SAE,
+#endif
+	WLAN_AKM_SUITE_8021X,
+	WLAN_AKM_SUITE_PSK,
+	WLAN_AKM_SUITE_8021X_SUITE_B
+};
+#endif
 
 #if (CFG_ENABLE_UNIFY_WIPHY == 0)
 static struct cfg80211_ops mtk_wlan_ops = {
@@ -681,8 +667,15 @@ static struct cfg80211_ops mtk_wlan_ops = {
 #if KERNEL_VERSION(4, 5, 0) <= CFG80211_VERSION_CODE
 	.abort_scan = mtk_cfg80211_abort_scan,
 #endif
+#if (CFG_SUPPORT_SUPPLICANT_SME == 0)
 	.connect = mtk_cfg80211_connect,
 	.disconnect = mtk_cfg80211_disconnect,
+#endif
+#if ((CFG_SUPPORT_SUPPLICANT_SME == 1) ||
+	(CFG_ENABLE_WIFI_DIRECT_CFG_80211 != 0))
+	.deauth = mtk_cfg80211_deauth,
+	.disassoc = mtk_cfg80211_disassoc,
+#endif
 	.join_ibss = mtk_cfg80211_join_ibss,
 	.leave_ibss = mtk_cfg80211_leave_ibss,
 	.set_power_mgmt = mtk_cfg80211_set_power_mgmt,
@@ -692,6 +685,9 @@ static struct cfg80211_ops mtk_wlan_ops = {
 #if CONFIG_SUPPORT_GTK_REKEY
 	.set_rekey_data = mtk_cfg80211_set_rekey_data,
 #endif
+#if (CFG_SUPPORT_SUPPLICANT_SME == 1)
+	.auth = mtk_cfg80211_auth,
+#endif
 	.assoc = mtk_cfg80211_assoc,
 
 	/* Action Frame TX/RX */
@@ -699,11 +695,10 @@ static struct cfg80211_ops mtk_wlan_ops = {
 	.cancel_remain_on_channel = mtk_cfg80211_cancel_remain_on_channel,
 	.mgmt_tx = mtk_cfg80211_mgmt_tx,
 	/* .mgmt_tx_cancel_wait        = mtk_cfg80211_mgmt_tx_cancel_wait, */
-#if KERNEL_VERSION(5, 8, 0) > CFG80211_VERSION_CODE
-	.mgmt_frame_register = mtk_cfg80211_mgmt_frame_register,
-#endif
 #if KERNEL_VERSION(5, 8, 0) <= CFG80211_VERSION_CODE
 	.update_mgmt_frame_registrations = mtk_cfg_mgmt_frame_update,
+#else
+	.mgmt_frame_register = mtk_cfg80211_mgmt_frame_register,
 #endif
 
 #ifdef CONFIG_NL80211_TESTMODE
@@ -718,11 +713,16 @@ static struct cfg80211_ops mtk_wlan_ops = {
 	.tdls_mgmt = mtk_cfg80211_tdls_mgmt,
 #endif
 	.update_ft_ies = mtk_cfg80211_update_ft_ies,
-#ifdef CFG_SUPPORT_SNIFFER_RADIOTAP
-	.set_monitor_channel = mtk_cfg80211_set_monitor_channel,
+#if CFG_SUPPORT_ROAMING
+	.set_cqm_rssi_config = mtk_cfg80211_set_cqm_rssi_config,
+#if KERNEL_VERSION(4, 14, 0) <= CFG80211_VERSION_CODE
+	.set_cqm_rssi_range_config = mtk_cfg80211_set_cqm_rssi_range_config,
 #endif
-#if CFG_SUPPORT_WPA3
-	.external_auth = mtk_cfg80211_external_auth,
+	.set_cqm_txe_config = mtk_cfg80211_set_cqm_txe_config,
+#endif
+
+#if (CFG_SUPPORT_SNIFFER_RADIOTAP == 1)
+	.set_monitor_channel = mtk_cfg80211_set_monitor_channel,
 #endif
 };
 #else /* CFG_ENABLE_UNIFY_WIPHY */
@@ -751,10 +751,11 @@ static struct cfg80211_ops mtk_cfg_ops = {
 	.sched_scan_start = mtk_cfg_sched_scan_start,
 	.sched_scan_stop = mtk_cfg_sched_scan_stop,
 #endif /* CFG_SUPPORT_SCHED_SCAN */
-
+#if (CFG_SUPPORT_SUPPLICANT_SME == 0)
 	.connect = mtk_cfg_connect,
-	.update_connect_params = mtk_cfg_update_connect_params,
 	.disconnect = mtk_cfg_disconnect,
+#endif
+	.deauth = mtk_cfg_deauth,
 	.join_ibss = mtk_cfg_join_ibss,
 	.leave_ibss = mtk_cfg_leave_ibss,
 	.set_power_mgmt = mtk_cfg_set_power_mgmt,
@@ -766,7 +767,9 @@ static struct cfg80211_ops mtk_cfg_ops = {
 #endif
 	.suspend = mtk_cfg_suspend,
 	.resume = mtk_cfg_resume,
-
+#if (CFG_SUPPORT_SUPPLICANT_SME == 1)
+	.auth = mtk_cfg_auth,
+#endif
 	.assoc = mtk_cfg_assoc,
 
 	/* Action Frame TX/RX */
@@ -774,11 +777,10 @@ static struct cfg80211_ops mtk_cfg_ops = {
 	.cancel_remain_on_channel = mtk_cfg_cancel_remain_on_channel,
 	.mgmt_tx = mtk_cfg_mgmt_tx,
 	/* .mgmt_tx_cancel_wait        = mtk_cfg80211_mgmt_tx_cancel_wait, */
-#if KERNEL_VERSION(5, 8, 0) > CFG80211_VERSION_CODE
-	.mgmt_frame_register = mtk_cfg_mgmt_frame_register,
-#endif
 #if KERNEL_VERSION(5, 8, 0) <= CFG80211_VERSION_CODE
 	.update_mgmt_frame_registrations = mtk_cfg_mgmt_frame_update,
+#else
+	.mgmt_frame_register = mtk_cfg_mgmt_frame_register,
 #endif
 
 #ifdef CONFIG_NL80211_TESTMODE
@@ -795,7 +797,6 @@ static struct cfg80211_ops mtk_cfg_ops = {
 #if (CFG_ENABLE_WIFI_DIRECT_CFG_80211 != 0)
 	.change_bss = mtk_cfg_change_bss,
 	.mgmt_tx_cancel_wait = mtk_cfg_mgmt_tx_cancel_wait,
-	.deauth = mtk_cfg_deauth,
 	.disassoc = mtk_cfg_disassoc,
 	.start_ap = mtk_cfg_start_ap,
 	.change_beacon = mtk_cfg_change_beacon,
@@ -806,14 +807,27 @@ static struct cfg80211_ops mtk_cfg_ops = {
 	.get_tx_power = mtk_cfg_get_txpower,
 #endif
 	.update_ft_ies = mtk_cfg80211_update_ft_ies,
-#ifdef CFG_SUPPORT_SNIFFER_RADIOTAP
+#if CFG_SUPPORT_ROAMING
+	.set_cqm_rssi_config = mtk_cfg80211_set_cqm_rssi_config,
+#if KERNEL_VERSION(4, 14, 0) <= CFG80211_VERSION_CODE
+	.set_cqm_rssi_range_config = mtk_cfg80211_set_cqm_rssi_range_config,
+#endif
+	.set_cqm_txe_config = mtk_cfg80211_set_cqm_txe_config,
+
+#endif
+#if (CFG_SUPPORT_SNIFFER_RADIOTAP == 1)
 	.set_monitor_channel = mtk_cfg80211_set_monitor_channel,
 #endif
-#if CFG_SUPPORT_WPA3
-	.external_auth = mtk_cfg80211_external_auth,
-#endif
+
 };
 #endif	/* CFG_ENABLE_UNIFY_WIPHY */
+
+#if KERNEL_VERSION(5, 3, 0) <= CFG80211_VERSION_CODE
+#define VENDOR_OPS_SET_POLICY(_val) .policy = (_val),
+#else
+#define VENDOR_OPS_SET_POLICY(_val)
+#endif
+
 
 #if KERNEL_VERSION(3, 18, 0) <= CFG80211_VERSION_CODE
 
@@ -826,11 +840,12 @@ static const struct wiphy_vendor_command
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 			 WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_get_channel_list
+		.doit = mtk_cfg80211_vendor_get_channel_list,
 #if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
 		.policy = nla_parse_wifi_attribute,
 		.maxattr = WIFI_ATTRIBUTE_MAX
+#else
+		VENDOR_OPS_SET_POLICY(VENDOR_CMD_RAW_DATA)
 #endif
 	},
 	{
@@ -840,11 +855,12 @@ static const struct wiphy_vendor_command
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 			 WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_set_country_code
+		.doit = mtk_cfg80211_vendor_set_country_code,
 #if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
 		.policy = nla_parse_wifi_attribute,
 		.maxattr = WIFI_ATTRIBUTE_MAX
+#else
+		VENDOR_OPS_SET_POLICY(VENDOR_CMD_RAW_DATA)
 #endif
 	},
 	{
@@ -855,11 +871,12 @@ static const struct wiphy_vendor_command
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV
 			| WIPHY_VENDOR_CMD_NEED_NETDEV
 			| WIPHY_VENDOR_CMD_NEED_RUNNING,
-		.doit = mtk_cfg80211_vendor_set_scan_mac_oui
+		.doit = mtk_cfg80211_vendor_set_scan_mac_oui,
 #if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
 		.policy = nla_parse_wifi_attribute,
 		.maxattr = WIFI_ATTRIBUTE_MAX
+#else
+		VENDOR_OPS_SET_POLICY(VENDOR_CMD_RAW_DATA)
 #endif
 	},
 	{
@@ -869,12 +886,14 @@ static const struct wiphy_vendor_command
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 			 WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_set_band
+		.doit = mtk_cfg80211_vendor_set_band,
 #if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
-		.policy = qca_wlan_vendor_attr_policy,
+		.policy = nal_parse_wifi_setband,
 		.maxattr = QCA_WLAN_VENDOR_ATTR_MAX
+#else
+		VENDOR_OPS_SET_POLICY(VENDOR_CMD_RAW_DATA)
 #endif
+
 	},
 #if CFG_SUPPORT_MBO
 	{
@@ -884,28 +903,25 @@ static const struct wiphy_vendor_command
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 			 WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_set_roaming_param
+		.doit = mtk_cfg80211_vendor_set_roaming_param,
 #if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
 		.policy = qca_roaming_param_policy,
 		.maxattr = QCA_ATTR_ROAMING_PARAM_MAX
+#else
+		VENDOR_OPS_SET_POLICY(VENDOR_CMD_RAW_DATA)
 #endif
-
 	},
 #endif
 	{
 		{
 			.vendor_id = OUI_QCA,
-			.subcmd = QCA_NL80211_VENDOR_SUBCMD_ROAMING
+			.subcmd = WIFI_SUBCMD_SET_ROAMING
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 			 WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_set_roaming_policy
-#if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
-		.policy = qca_wlan_vendor_attr_policy,
-		.maxattr = QCA_WLAN_VENDOR_ATTR_MAX
-#endif
+		.doit = mtk_cfg80211_vendor_set_roaming_policy,
+		VENDOR_OPS_SET_POLICY(VENDOR_CMD_RAW_DATA)
+
 	},
 	{
 		{
@@ -914,11 +930,8 @@ static const struct wiphy_vendor_command
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 			 WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_get_roaming_capabilities
-#if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
-		.policy = VENDOR_CMD_RAW_DATA
-#endif
+		.doit = mtk_cfg80211_vendor_get_roaming_capabilities,
+		VENDOR_OPS_SET_POLICY(VENDOR_CMD_RAW_DATA)
 	},
 	{
 		{
@@ -927,11 +940,12 @@ static const struct wiphy_vendor_command
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 			 WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_config_roaming
+		.doit = mtk_cfg80211_vendor_config_roaming,
 #if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
 		.policy = nla_parse_wifi_attribute,
 		.maxattr = WIFI_ATTRIBUTE_MAX
+#else
+		VENDOR_OPS_SET_POLICY(VENDOR_CMD_RAW_DATA)
 #endif
 	},
 	{
@@ -941,11 +955,12 @@ static const struct wiphy_vendor_command
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 			 WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_enable_roaming
+		.doit = mtk_cfg80211_vendor_enable_roaming,
 #if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
 		.policy = nla_parse_wifi_attribute,
 		.maxattr = WIFI_ATTRIBUTE_MAX
+#else
+		VENDOR_OPS_SET_POLICY(VENDOR_CMD_RAW_DATA)
 #endif
 	},
 	/* RTT */
@@ -956,11 +971,8 @@ static const struct wiphy_vendor_command
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 		WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_get_rtt_capabilities
-#if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
-		.policy = VENDOR_CMD_RAW_DATA
-#endif
+		.doit = mtk_cfg80211_vendor_get_rtt_capabilities,
+		VENDOR_OPS_SET_POLICY(VENDOR_CMD_RAW_DATA)
 	},
 	/* Link Layer Statistics */
 	{
@@ -970,11 +982,8 @@ static const struct wiphy_vendor_command
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 		WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_llstats_get_info
-#if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
-		.policy = VENDOR_CMD_RAW_DATA
-#endif
+		.doit = mtk_cfg80211_vendor_llstats_get_info,
+		VENDOR_OPS_SET_POLICY(VENDOR_CMD_RAW_DATA)
 	},
 	/* RSSI Monitoring */
 	{
@@ -984,11 +993,12 @@ static const struct wiphy_vendor_command
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 		WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_set_rssi_monitoring
+		.doit = mtk_cfg80211_vendor_set_rssi_monitoring,
 #if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
 		.policy = nla_parse_wifi_rssi_monitor,
 		.maxattr = WIFI_ATTRIBUTE_RSSI_MONITOR_ATTRIBUTE_MAX
+#else
+		VENDOR_OPS_SET_POLICY(VENDOR_CMD_RAW_DATA)
 #endif
 	},
 	/* Packet Keep Alive */
@@ -999,11 +1009,12 @@ static const struct wiphy_vendor_command
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 		WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_packet_keep_alive_start
+		.doit = mtk_cfg80211_vendor_packet_keep_alive_start,
 #if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
 		.policy = nla_parse_offloading_policy,
 		.maxattr = MKEEP_ALIVE_ATTRIBUTE_MAX
+#else
+		VENDOR_OPS_SET_POLICY(VENDOR_CMD_RAW_DATA)
 #endif
 	},
 	{
@@ -1013,11 +1024,12 @@ static const struct wiphy_vendor_command
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 		WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_packet_keep_alive_stop
+		.doit = mtk_cfg80211_vendor_packet_keep_alive_stop,
 #if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
 		.policy = nla_parse_offloading_policy,
 		.maxattr = MKEEP_ALIVE_ATTRIBUTE_MAX
+#else
+		VENDOR_OPS_SET_POLICY(VENDOR_CMD_RAW_DATA)
 #endif
 	},
 	/* Get Driver Version or Firmware Version */
@@ -1028,11 +1040,12 @@ static const struct wiphy_vendor_command
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 				WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_get_version
+		.doit = mtk_cfg80211_vendor_get_version,
 #if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
 		.policy = nla_get_version_policy,
 		.maxattr = LOGGER_ATTRIBUTE_MAX
+#else
+		VENDOR_OPS_SET_POLICY(VENDOR_CMD_RAW_DATA)
 #endif
 	},
 	/* Get Supported Feature Set */
@@ -1043,42 +1056,8 @@ static const struct wiphy_vendor_command
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 				WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_get_supported_feature_set
-#if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
-		.policy = VENDOR_CMD_RAW_DATA
-#endif
-
-	},
-	/* Set dual STA use cases */
-	{
-		{
-			.vendor_id = GOOGLE_OUI,
-			.subcmd = WIFI_SUBCMD_SET_MULTISTA_USE_CASE
-		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
-				WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_set_multista_use_case
-#if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
-		,
-		.policy = nla_parse_wifi_multista,
-		.maxattr = WIFI_ATTRIBUTE_MAX
-#endif
-	},
-	/* Select primary connection */
-	{
-		{
-			.vendor_id = GOOGLE_OUI,
-			.subcmd = WIFI_SUBCMD_SET_MULTISTA_PRIMARY_CONNECTION
-		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
-				WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_set_multista_primary_connection
-#if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
-		,
-		.policy = nla_parse_wifi_multista,
-		.maxattr = WIFI_ATTRIBUTE_MAX
-#endif
+		.doit = mtk_cfg80211_vendor_get_supported_feature_set,
+		VENDOR_OPS_SET_POLICY(VENDOR_CMD_RAW_DATA)
 	},
 	/* Set Tx Power Scenario */
 	{
@@ -1088,11 +1067,12 @@ static const struct wiphy_vendor_command
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 				WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_set_tx_power_scenario
+		.doit = mtk_cfg80211_vendor_set_tx_power_scenario,
 #if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
 		.policy = nla_parse_wifi_attribute,
 		.maxattr = WIFI_ATTRIBUTE_MAX
+#else
+		VENDOR_OPS_SET_POLICY(VENDOR_CMD_RAW_DATA)
 #endif
 	},
 #if CFG_SUPPORT_P2P_PREFERRED_FREQ_LIST
@@ -1105,11 +1085,12 @@ static const struct wiphy_vendor_command
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV
 				| WIPHY_VENDOR_CMD_NEED_NETDEV
 				| WIPHY_VENDOR_CMD_NEED_RUNNING,
-		.doit = mtk_cfg80211_vendor_get_preferred_freq_list
+		.doit = mtk_cfg80211_vendor_get_preferred_freq_list,
 #if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
 		.policy = nla_get_preferred_freq_list_policy,
 		.maxattr = WIFI_VENDOR_ATTR_PREFERRED_FREQ_LIST_MAX
+#else
+		VENDOR_OPS_SET_POLICY(VENDOR_CMD_RAW_DATA)
 #endif
 	},
 #endif /* CFG_SUPPORT_P2P_PREFERRED_FREQ_LIST */
@@ -1122,26 +1103,12 @@ static const struct wiphy_vendor_command
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV
 				| WIPHY_VENDOR_CMD_NEED_NETDEV
 				| WIPHY_VENDOR_CMD_NEED_RUNNING,
-		.doit = mtk_cfg80211_vendor_acs
+		.doit = mtk_cfg80211_vendor_acs,
 #if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
 		.policy = nla_get_acs_policy,
 		.maxattr = WIFI_VENDOR_ATTR_ACS_MAX
-#endif
-	},
-#endif
-#if CFG_SUPPORT_DFS_MASTER
-	{
-		{
-			.vendor_id = OUI_QCA,
-			.subcmd = NL80211_VENDOR_SUBCMD_DFS_CAPABILITY
-		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV
-				| WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_dfs_capability
-#if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
-		,
-		.policy = VENDOR_CMD_RAW_DATA
+#else
+		VENDOR_OPS_SET_POLICY(VENDOR_CMD_RAW_DATA)
 #endif
 	},
 #endif
@@ -1152,57 +1119,25 @@ static const struct wiphy_vendor_command
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV
 				| WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_get_features
-#if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
-		.policy = VENDOR_CMD_RAW_DATA
-#endif
-
+		.doit = mtk_cfg80211_vendor_get_features,
+		VENDOR_OPS_SET_POLICY(VENDOR_CMD_RAW_DATA)
 	},
 	{
 		{
 			.vendor_id = OUI_MTK,
 			.subcmd =  NL80211_VENDOR_SUBCMD_GET_APF_CAPABILITIES
 		},
-			.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 				 WIPHY_VENDOR_CMD_NEED_NETDEV,
-			.doit = mtk_cfg80211_vendor_get_apf_capabilities
-#if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-			,
-			.policy = nla_get_apf_policy,
-			.maxattr = APF_ATTRIBUTE_MAX
-#endif
-	},
-#if (CFG_SUPPORT_APF == 1)
-	{
-		{
-			.vendor_id = OUI_MTK,
-			.subcmd = NL80211_VENDOR_SUBCMD_SET_PACKET_FILTER
-		},
-			.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
-				 WIPHY_VENDOR_CMD_NEED_NETDEV,
-			.doit = mtk_cfg80211_vendor_set_packet_filter
-#if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-			,
-			.policy = nla_get_apf_policy,
-			.maxattr = APF_ATTRIBUTE_MAX
-#endif
-	},
-	{
-		{
-			.vendor_id = OUI_MTK,
-			.subcmd = NL80211_VENDOR_SUBCMD_READ_PACKET_FILTER
-		},
-			.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
-				WIPHY_VENDOR_CMD_NEED_NETDEV,
-			.doit = mtk_cfg80211_vendor_read_packet_filter
+		.doit = mtk_cfg80211_vendor_get_apf_capabilities
 #if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
 		,
 		.policy = nla_get_apf_policy,
 		.maxattr = APF_ATTRIBUTE_MAX
+#else
+		VENDOR_OPS_SET_POLICY(VENDOR_CMD_RAW_DATA)
 #endif
 	},
-#endif /* CFG_SUPPORT_APF */
 	/* Get Driver Memory Dump */
 	{
 		{
@@ -1211,26 +1146,8 @@ static const struct wiphy_vendor_command
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 				WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_driver_memory_dump
-#if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
-		.policy = VENDOR_CMD_RAW_DATA
-#endif
-	},
-	{
-		{
-			.vendor_id = OUI_MTK,
-			.subcmd = WIFI_SUBCMD_SET_SCAN_PARAM
-		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV
-			| WIPHY_VENDOR_CMD_NEED_NETDEV
-			| WIPHY_VENDOR_CMD_NEED_RUNNING,
-		.doit = mtk_cfg80211_vendor_set_scan_param
-#if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
-		.policy = mtk_scan_param_policy,
-		.maxattr = WIFI_ATTR_SCAN_MAX
-#endif
+		.doit = mtk_cfg80211_vendor_driver_memory_dump,
+		VENDOR_OPS_SET_POLICY(VENDOR_CMD_RAW_DATA)
 	},
 #if CFG_SUPPORT_NAN
 	{
@@ -1241,10 +1158,9 @@ static const struct wiphy_vendor_command
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 				WIPHY_VENDOR_CMD_NEED_NETDEV |
 				WIPHY_VENDOR_CMD_NEED_RUNNING,
-		.doit = mtk_cfg80211_vendor_nan
+		.doit = mtk_cfg80211_vendor_nan,
 #if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
-		,
-		.policy = VENDOR_CMD_RAW_DATA
+		VENDOR_OPS_SET_POLICY(VENDOR_CMD_RAW_DATA)
 #endif
 	},
 	{
@@ -1255,42 +1171,13 @@ static const struct wiphy_vendor_command
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
 				WIPHY_VENDOR_CMD_NEED_NETDEV |
 				WIPHY_VENDOR_CMD_NEED_RUNNING,
-		.doit = mtk_cfg80211_vendor_ndp
+		.doit = mtk_cfg80211_vendor_ndp,
 #if KERNEL_VERSION(5, 4, 0) <= CFG80211_VERSION_CODE
-		,
 		.policy = mtk_wlan_vendor_ndp_policy,
 		.maxattr = MTK_WLAN_VENDOR_ATTR_NDP_PARAMS_MAX
 #endif
 	},
 #endif
-	/* Get Trx Stats */
-	{
-		{
-			.vendor_id = OUI_MTK,
-			.subcmd = NL80211_VENDOR_SUBCMD_GET_TRX_STATS
-		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
-				WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_get_trx_stats
-#if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
-		.policy = VENDOR_CMD_RAW_DATA
-#endif
-	},
-	/* Get Wifi Reset */
-	{
-		{
-			.vendor_id = OUI_MTK,
-			.subcmd = WIFI_SUBCMD_TRIGGER_RESET
-		},
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
-				WIPHY_VENDOR_CMD_NEED_NETDEV,
-		.doit = mtk_cfg80211_vendor_trigger_reset
-#if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
-		,
-		.policy = VENDOR_CMD_RAW_DATA
-#endif
-	},
 };
 
 static const struct nl80211_vendor_cmd_info
@@ -1327,74 +1214,29 @@ static const struct nl80211_vendor_cmd_info
 		.vendor_id = GOOGLE_OUI,
 		.subcmd = WIFI_EVENT_RSSI_MONITOR
 	},
-#if CFG_SUPPORT_DATA_STALL
+#if CFG_SUPPORT_MAGIC_PKT_VENDOR_EVENT
 	{
-		.vendor_id = OUI_MTK,
-		.subcmd = WIFI_EVENT_DRIVER_ERROR
+		.vendor_id = GOOGLE_OUI,
+		.subcmd = WIFI_EVENT_MAGIC_PACKET_RECEIVED
 	},
 #endif
-#if CFG_AUTO_CHANNEL_SEL_SUPPORT
 	{
 		.vendor_id = OUI_QCA,
 		.subcmd = NL80211_VENDOR_SUBCMD_ACS
 	},
-#endif
-
 	{
 		.vendor_id = OUI_MTK,
-		.subcmd = WIFI_EVENT_GENERIC_RESPONSE
-	},
-
-#if CFG_SUPPORT_BIGDATA_PIP
-	{
-		.vendor_id = OUI_MTK,
-		.subcmd = WIFI_EVENT_BIGDATA_PIP
-	},
-#endif
-
-#if CFG_SUPPORT_DBDC
-	{
-		.vendor_id = OUI_MTK,
-		.subcmd = MTK_NL80211_OP_MODE_CHANGE
-	},
-#endif
-
-	{
-		.vendor_id = OUI_QCA,
-		.subcmd = NL80211_VENDOR_SUBCMD_DFS_OFFLOAD_CAC_STARTED
-	},
-
-	{
-		.vendor_id = OUI_QCA,
-		.subcmd = NL80211_VENDOR_SUBCMD_DFS_OFFLOAD_CAC_FINISHED
-	},
-
-	{
-		.vendor_id = OUI_QCA,
-		.subcmd = NL80211_VENDOR_SUBCMD_DFS_OFFLOAD_CAC_ABORTED
-	},
-
-	{
-		.vendor_id = OUI_QCA,
-		.subcmd = NL80211_VENDOR_SUBCMD_DFS_OFFLOAD_CAC_NOP_FINISHED
-	},
-
-	{
-		.vendor_id = OUI_QCA,
-		.subcmd = NL80211_VENDOR_SUBCMD_DFS_OFFLOAD_RADAR_DETECTED
+		.subcmd = WIFI_EVENT_DRIVER_ERROR
 	},
 	{
-		.vendor_id = OUI_MTK,
-		.subcmd = MTK_NL80211_TRIGGER_RESET
-	},
-	[WIFI_EVENT_SUBCMD_NAN] {
 		.vendor_id = OUI_MTK,
 		.subcmd = NL80211_VENDOR_SUBCMD_NAN
 	},
-	[WIFI_EVENT_SUBCMD_NDP] {
+	{
 		.vendor_id = OUI_MTK,
 		.subcmd = NL80211_VENDOR_SUBCMD_NDP
-	}
+	},
+
 };
 #endif
 
@@ -1408,8 +1250,7 @@ static const struct ieee80211_txrx_stypes
 	[NL80211_IFTYPE_STATION] = {
 		.tx = 0xffff,
 		.rx = BIT(IEEE80211_STYPE_ACTION >> 4) |
-		      BIT(IEEE80211_STYPE_PROBE_REQ >> 4) |
-		      BIT(IEEE80211_STYPE_AUTH >> 4)
+		      BIT(IEEE80211_STYPE_PROBE_REQ >> 4)
 	},
 	[NL80211_IFTYPE_AP] = {
 		.tx = 0xffff,
@@ -1437,20 +1278,12 @@ static const struct ieee80211_txrx_stypes
 	[NL80211_IFTYPE_P2P_CLIENT] = {
 		.tx = 0xffff,
 		.rx = BIT(IEEE80211_STYPE_ACTION >> 4) |
-		      BIT(IEEE80211_STYPE_PROBE_REQ >> 4) |
-		      BIT(IEEE80211_STYPE_AUTH >> 4)
+		      BIT(IEEE80211_STYPE_PROBE_REQ >> 4)
 	},
 	[NL80211_IFTYPE_P2P_GO] = {
 		.tx = 0xffff,
 		.rx = BIT(IEEE80211_STYPE_PROBE_REQ >> 4) |
 		      BIT(IEEE80211_STYPE_ACTION >> 4)
-#if CFG_SUPPORT_SOFTAP_WPA3
-			| BIT(IEEE80211_STYPE_ASSOC_REQ >> 4) |
-			  BIT(IEEE80211_STYPE_REASSOC_REQ >> 4) |
-			  BIT(IEEE80211_STYPE_DISASSOC >> 4) |
-			  BIT(IEEE80211_STYPE_AUTH >> 4) |
-			  BIT(IEEE80211_STYPE_DEAUTH >> 4)
-#endif
 	}
 };
 
@@ -1461,13 +1294,14 @@ static const struct wiphy_wowlan_support mtk_wlan_wowlan_support = {
 };
 #endif
 
-#if CFG_SUPPORT_RM_BEACON_REPORT_BY_SUPPLICANT
+#if (CFG_SUPPORT_SUPPLICANT_SME == 1)
 /* NL80211_FEATURE_DS_PARAM_SET_IE_IN_PROBES & NL80211_FEATURE_QUIET
  * support in linux kernet version => 3.18
  */
 #if KERNEL_VERSION(3, 18, 0) > CFG80211_VERSION_CODE
 #define NL80211_FEATURE_DS_PARAM_SET_IE_IN_PROBES BIT(19)
 #define NL80211_FEATURE_QUIET BIT(21)
+#define NL80211_FEATURE_TX_POWER_INSERTION BIT(22)
 #endif
 #endif
 
@@ -1518,39 +1352,40 @@ unsigned int _cfg80211_classify8021d(struct sk_buff *skb)
 }
 #endif
 
-#if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
+#if KERNEL_VERSION(5, 2, 0) <= LINUX_VERSION_CODE
 u16 wlanSelectQueue(struct net_device *dev,
 		    struct sk_buff *skb,
 		    struct net_device *sb_dev)
 {
-	return mtk_wlan_ndev_select_queue(dev, skb);
+	return mtk_wlan_ndev_select_queue(skb);
 }
 #elif KERNEL_VERSION(4, 19, 0) <= LINUX_VERSION_CODE
 u16 wlanSelectQueue(struct net_device *dev,
 		    struct sk_buff *skb,
-		    struct net_device *sb_dev, select_queue_fallback_t fallback)
+		    struct net_device *sb_dev,
+		    select_queue_fallback_t fallback)
 {
-	return mtk_wlan_ndev_select_queue(dev, skb);
+	return mtk_wlan_ndev_select_queue(skb);
 }
 #elif KERNEL_VERSION(3, 14, 0) <= LINUX_VERSION_CODE
 u16 wlanSelectQueue(struct net_device *dev,
 		    struct sk_buff *skb,
 		    void *accel_priv, select_queue_fallback_t fallback)
 {
-	return mtk_wlan_ndev_select_queue(dev, skb);
+	return mtk_wlan_ndev_select_queue(skb);
 }
 #elif KERNEL_VERSION(3, 13, 0) <= LINUX_VERSION_CODE
 u16 wlanSelectQueue(struct net_device *dev,
 		    struct sk_buff *skb,
 		    void *accel_priv)
 {
-	return mtk_wlan_ndev_select_queue(dev, skb);
+	return mtk_wlan_ndev_select_queue(skb);
 }
 #else
 u16 wlanSelectQueue(struct net_device *dev,
 		    struct sk_buff *skb)
 {
-	return mtk_wlan_ndev_select_queue(dev, skb);
+	return mtk_wlan_ndev_select_queue(skb);
 }
 #endif
 
@@ -1625,11 +1460,92 @@ static void glLoadNvram(struct GLUE_INFO *prGlueInfo,
 			MAX_SUBBAND_NUM*sizeof(uint8_t));
 	}
 
-	log_dbg(INIT, INFO, "NVRAM Version = [%08x,%08x], 5G = [%d,%d]\n",
+	log_dbg(INIT, INFO, "u2Part1OwnVersion = %08x, u2Part1PeerVersion = %08x\n",
 				 prNvramSettings->u2Part1OwnVersion,
-				 prNvramSettings->u2Part1PeerVersion,
-				 prRegInfo->ucSupport5GBand,
-				 prRegInfo->ucEnable5GBand);
+				 prNvramSettings->u2Part1PeerVersion);
+}
+
+static void glTaskletResInit(struct GLUE_INFO *prGlueInfo)
+{
+#if defined(_HIF_PCIE) || defined(_HIF_AXI)
+	prGlueInfo->u4TxMsduRetFifoLen = CFG_TX_MAX_PKT_NUM * sizeof(void *);
+	prGlueInfo->prTxMsduRetFifoBuf = kalMemAlloc(
+		prGlueInfo->u4TxMsduRetFifoLen,
+		PHY_MEM_TYPE);
+
+	if (prGlueInfo->prTxMsduRetFifoBuf) {
+		KAL_FIFO_INIT(&prGlueInfo->rTxMsduRetFifo,
+			prGlueInfo->prTxMsduRetFifoBuf,
+			prGlueInfo->u4TxMsduRetFifoLen);
+	} else {
+		DBGLOG(INIT, ERROR,
+				"Cannot alloc buf(%d) for TxMsduRetFifo\n",
+				prGlueInfo->u4TxMsduRetFifoLen);
+		prGlueInfo->u4TxMsduRetFifoLen = 0;
+	}
+#endif
+}
+static void glTaskletResUninit(struct GLUE_INFO *prGlueInfo)
+{
+#if defined(_HIF_PCIE) || defined(_HIF_AXI)
+	if (prGlueInfo->prTxMsduRetFifoBuf) {
+		struct MSDU_INFO *prMsduInfo;
+
+		/* Return pending MSDU */
+		while (KAL_FIFO_OUT(&prGlueInfo->rTxMsduRetFifo, prMsduInfo)) {
+			if (!prMsduInfo) {
+				DBGLOG(RX, ERROR, "prMsduInfo null\n");
+				break;
+			}
+			nicTxReturnMsduInfo(prGlueInfo->prAdapter, prMsduInfo);
+		}
+		kalMemFree(prGlueInfo->prTxMsduRetFifoBuf, PHY_MEM_TYPE,
+			prGlueInfo->u4TxMsduRetFifoLen);
+		prGlueInfo->prTxMsduRetFifoBuf = NULL;
+		prGlueInfo->u4TxMsduRetFifoLen = 0;
+	}
+#endif
+}
+
+static void glTaskletInit(struct GLUE_INFO *prGlueInfo)
+{
+	glTaskletResInit(prGlueInfo);
+
+	tasklet_init(&prGlueInfo->rRxTask, halRxTasklet,
+			(unsigned long)prGlueInfo);
+
+#if (CFG_SUPPORT_RETURN_TASK == 1)
+	tasklet_init(&prGlueInfo->rRxRfbRetTask,
+		wlanReturnPacketDelaySetupTasklet,
+		(unsigned long)prGlueInfo);
+#endif
+
+#if defined(_HIF_PCIE) || defined(_HIF_AXI)
+	tasklet_init(&prGlueInfo->rTxMsduRetTask,
+			halWpdmaFreeMsduTasklet,
+			(unsigned long)prGlueInfo);
+#endif
+
+	tasklet_init(&prGlueInfo->rTxCompleteTask,
+			halTxCompleteTasklet,
+			(unsigned long)prGlueInfo);
+}
+
+static void glTaskletUninit(struct GLUE_INFO *prGlueInfo)
+{
+	tasklet_kill(&prGlueInfo->rTxCompleteTask);
+
+#if defined(_HIF_PCIE) || defined(_HIF_AXI)
+	tasklet_kill(&prGlueInfo->rTxMsduRetTask);
+#endif
+
+#if (CFG_SUPPORT_RETURN_TASK == 1)
+	tasklet_kill(&prGlueInfo->rRxRfbRetTask);
+#endif
+
+	tasklet_kill(&prGlueInfo->rRxTask);
+
+	glTaskletResUninit(prGlueInfo);
 }
 
 static void wlanFreeNetDev(void)
@@ -1765,8 +1681,6 @@ int wlanDoIOCTL(struct net_device *prDev,
 #else
 		ret = priv_support_driver_cmd(prDev, prIfReq, i4Cmd);
 #endif /* CFG_ANDROID_AOSP_PRIV_CMD */
-	}  else if (i4Cmd == SIOCDEVPRIVATE + 2) {
-		ret = priv_support_ioctl(prDev, prIfReq, i4Cmd);
 	} else {
 		DBGLOG(INIT, WARN, "Unexpected ioctl command: 0x%04x\n",
 		       i4Cmd);
@@ -1837,6 +1751,8 @@ static void wlanSetMulticastList(struct net_device *prDev)
 	schedule_delayed_work(&workq, 0);
 }
 
+
+
 /* FIXME: Since we cannot sleep in the wlanSetMulticastList, we arrange
  * another workqueue for sleeping. We don't want to block
  * main_thread, so we can't let tx_thread to do this
@@ -1851,10 +1767,13 @@ static void wlanSetMulticastListWorkQueue(
 	uint32_t u4SetInfoLen;
 	struct net_device *prDev = gPrDev;
 	uint8_t ucBssIndex = 0;
+	uint32_t rStatus = WLAN_STATUS_SUCCESS;
 
 	ucBssIndex = wlanGetBssIdx(prDev);
 	if (!IS_BSS_INDEX_VALID(ucBssIndex))
 		return;
+
+	DBGLOG(INIT, INFO, "ucBssIndex = %d\n", ucBssIndex);
 
 	down(&g_halt_sem);
 	if (g_u4HaltFlag) {
@@ -1880,7 +1799,7 @@ static void wlanSetMulticastListWorkQueue(
 		return;
 	}
 
-	DBGLOG(INIT, TRACE,
+	DBGLOG(INIT, INFO,
 	       "wlanSetMulticastListWorkQueue prDev->flags:0x%x\n",
 	       prDev->flags);
 
@@ -1943,7 +1862,7 @@ static void wlanSetMulticastListWorkQueue(
 
 		up(&g_halt_sem);
 
-		kalIoctlByBssIdx(prGlueInfo,
+		rStatus = kalIoctlByBssIdx(prGlueInfo,
 			 wlanoidSetMulticastList, prMCAddrList, (i * ETH_ALEN),
 			 FALSE, FALSE, TRUE, &u4SetInfoLen,
 			 ucBssIndex);
@@ -1983,9 +1902,9 @@ void wlanSchedScanStoppedWorkQueue(struct work_struct *work)
 	 * sched_scan_mtx dead lock issue
 	 */
 #if KERNEL_VERSION(4, 12, 0) <= CFG80211_VERSION_CODE
-	cfg80211_sched_scan_stopped(wlanGetWiphy(), 0);
+	cfg80211_sched_scan_stopped(priv_to_wiphy(prGlueInfo), 0);
 #else
-	cfg80211_sched_scan_stopped(wlanGetWiphy());
+	cfg80211_sched_scan_stopped(priv_to_wiphy(prGlueInfo));
 #endif
 	DBGLOG(SCN, INFO,
 	       "cfg80211_sched_scan_stopped event send done WorkQueue thread return from wlanSchedScanStoppedWorkQueue\n");
@@ -2062,7 +1981,8 @@ netdev_tx_t wlanHardStartXmit(struct sk_buff *prSkb,
 #endif /* CFG_SUPPORT_PASSPOINT */
 
 #if CFG_CHIP_RESET_SUPPORT
-	if (!wlanIsDriverReady(prGlueInfo)) {
+	if (!wlanIsDriverReady(prGlueInfo,
+		(WLAN_DRV_READY_CHCECK_RESET | WLAN_DRV_READY_CHCECK_WLAN_ON))) {
 		DBGLOG(INIT, WARN,
 		"u4ReadyFlag:%u, kalIsResetting():%d, dropping the packet\n",
 		prGlueInfo->u4ReadyFlag, kalIsResetting());
@@ -2071,12 +1991,23 @@ netdev_tx_t wlanHardStartXmit(struct sk_buff *prSkb,
 	}
 #endif
 	kalResetPacket(prGlueInfo, (void *) prSkb);
+
+	STATS_TX_TIME_ARRIVE(prSkb);
+
+#if (CFG_SUPPORT_TX_TSO_SW == 1)
+	if (kalSwTsoXmit(&prSkb, prDev, prGlueInfo, ucBssIndex)
+		== WLAN_STATUS_SUCCESS)
+		return NETDEV_TX_OK;
+#endif
+
 	if (kalHardStartXmit(prSkb, prDev, prGlueInfo,
 			     ucBssIndex) == WLAN_STATUS_SUCCESS) {
 		/* Successfully enqueue to Tx queue */
 		/* Successfully enqueue to Tx queue */
+#if (CFG_SUPPORT_PERMON == 1)
 		if (netif_carrier_ok(prDev))
 			kalPerMonStart(prGlueInfo);
+#endif
 	}
 
 	/* For Linux, we'll always return OK FLAG, because we'll free this skb
@@ -2102,17 +2033,7 @@ netdev_tx_t wlanHardStartXmit(struct sk_buff *prSkb,
 struct net_device_stats *wlanGetStats(IN struct net_device
 				      *prDev)
 {
-	struct NETDEV_PRIVATE_GLUE_INFO *prNetDevPrivate;
-
-	prNetDevPrivate = (struct NETDEV_PRIVATE_GLUE_INFO *)
-			netdev_priv(prDev);
-	kalMemCopy(&prNetDevPrivate->stats, &prDev->stats,
-			sizeof(struct net_device_stats));
-#if CFG_MTK_MDDP_SUPPORT
-	mddpGetMdStats(prDev);
-#endif
-
-	return (struct net_device_stats *) &prNetDevPrivate->stats;
+	return (struct net_device_stats *)kalGetStats(prDev);
 }				/* end of wlanGetStats() */
 
 void wlanDebugInit(void)
@@ -2135,25 +2056,6 @@ void wlanDebugInit(void)
 
 }
 
-#if CFG_SUPPORT_RX_GRO
-/*----------------------------------------------------------------------------*/
-/*!
- * \brief A method of callback function for napi struct
- *
- * It just return false because driver indicate Rx packet directly.
- *
- * \param[in] napi      Pointer to struct napi_struct.
- * \param[in] budget    Polling time interval.
- *
- * \return false
- */
-/*----------------------------------------------------------------------------*/
-static int kal_napi_poll(struct napi_struct *napi, int budget)
-{
-	return 0;
-}
-#endif
-
 /*----------------------------------------------------------------------------*/
 /*!
  * \brief A function for prDev->init
@@ -2167,10 +2069,7 @@ static int kal_napi_poll(struct napi_struct *napi, int budget)
 static int wlanInit(struct net_device *prDev)
 {
 	struct GLUE_INFO *prGlueInfo = NULL;
-#if CFG_SUPPORT_RX_GRO
-	uint8_t ucBssIndex;
-	struct NETDEV_PRIVATE_GLUE_INFO *prNetDevPrivate = NULL;
-#endif
+
 	if (!prDev)
 		return -ENXIO;
 
@@ -2181,24 +2080,27 @@ static int wlanInit(struct net_device *prDev)
 	INIT_DELAYED_WORK(&sched_workq,
 			  wlanSchedScanStoppedWorkQueue);
 
+#if CFG_REDIRECT_OID_SUPPORT
+	INIT_DELAYED_WORK(&oid_workq,
+				wlanSchedOidWorkQueue);
+#endif
+
+#if (CFG_SUPPORT_SUPPLICANT_SME == 1)
+#if CFG_SUPPORT_CFG80211_QUEUE
+	INIT_DELAYED_WORK(&cfg80211_workq,
+				wlanSchedCfg80211WorkQueue);
+#endif
+#endif
+
 	/* 20161024 init wow port setting */
 #if CFG_WOW_SUPPORT
 	kalWowInit(prGlueInfo);
 #endif
 
 #if CFG_SUPPORT_RX_GRO
-	/* Register GRO function to kernel */
-	ucBssIndex = wlanGetBssIdx(prDev);
-	prDev->features |= NETIF_F_GRO;
-	prDev->hw_features |= NETIF_F_GRO;
-	prNetDevPrivate = (struct NETDEV_PRIVATE_GLUE_INFO *)
-		netdev_priv(prDev);
-	spin_lock_init(&prNetDevPrivate->napi_spinlock);
-	prNetDevPrivate->napi.dev = prDev;
-	netif_napi_add(prNetDevPrivate->napi.dev,
-		&prNetDevPrivate->napi, kal_napi_poll, 64);
-	DBGLOG(INIT, INFO,
-		"GRO interface added successfully:%p\n", prDev);
+	spin_lock_init(&prGlueInfo->napi_spinlock);
+	kalNapiInit(prDev);
+	kalNapiRxDirectInit(prDev);
 #endif
 	return 0;		/* success */
 }				/* end of wlanInit() */
@@ -2255,18 +2157,13 @@ static int wlanSetMacAddress(struct net_device *ndev, void *addr)
 	 */
 	sa = (struct sockaddr *)addr;
 	prGlueInfo = *((struct GLUE_INFO **) netdev_priv(ndev));
-
-	if (!prGlueInfo || !prGlueInfo->u4ReadyFlag) {
-		DBGLOG(REQ, WARN, "driver is not ready\n");
-		return -EFAULT;
-	}
-
 	prAdapter = prGlueInfo->prAdapter;
+
 	prAisBssInfo = aisGetAisBssInfo(prAdapter,
 		wlanGetBssIdx(ndev));
 
 	COPY_MAC_ADDR(prAisBssInfo->aucOwnMacAddr, sa->sa_data);
-	COPY_MAC_ADDR(ndev->dev_addr, sa->sa_data);
+	kal_eth_hw_addr_set(ndev, sa->sa_data);
 	DBGLOG(INIT, INFO,
 		"[wlan%d] Set connect random macaddr to " MACSTR ".\n",
 		prAisBssInfo->ucBssIndex,
@@ -2287,49 +2184,13 @@ static int wlanSetMacAddress(struct net_device *ndev, void *addr)
 /*----------------------------------------------------------------------------*/
 static int wlanOpen(struct net_device *prDev)
 {
-/* fos_change begin */
-#if CFG_SUPPORT_EXCEPTION_STATISTICS || CFG_SUPPORT_WAKEUP_STATISTICS
-	struct GLUE_INFO *prGlueInfo = NULL;
-#endif /* fos_change end */
 	ASSERT(prDev);
 
-/* fos_change begin */
-#if CFG_SUPPORT_EXCEPTION_STATISTICS || CFG_SUPPORT_WAKEUP_STATISTICS
-	prGlueInfo = *((struct GLUE_INFO **) netdev_priv(prDev));
-	ASSERT(prGlueInfo);
-#endif /* fos_change begin */
+#if CFG_SUPPORT_RX_GRO
+	kalNapiEnable(prDev);
+#endif
 
 	netif_tx_start_all_queues(prDev);
-/* fos_change begin */
-#if CFG_SUPPORT_WAKEUP_STATISTICS
-	if (prGlueInfo->prAdapter) {
-		/* Initialize arWakeupStatistic */
-		kalMemSet(prGlueInfo->prAdapter->arWakeupStatistic, 0,
-			sizeof(prGlueInfo->prAdapter->arWakeupStatistic));
-		/* Initialize wake_event_count */
-		kalMemSet(prGlueInfo->prAdapter->wake_event_count, 0,
-			sizeof(prGlueInfo->prAdapter->wake_event_count));
-	}
-#endif
-#if CFG_SUPPORT_EXCEPTION_STATISTICS
-	if (prGlueInfo->prAdapter) {
-		kalMemSet(prGlueInfo->prAdapter->beacon_timeout_count, 0,
-			sizeof(prGlueInfo->prAdapter->beacon_timeout_count));
-		prGlueInfo->prAdapter->total_beacon_timeout_count = 0;
-
-		kalMemSet(prGlueInfo->prAdapter->tx_done_fail_count, 0,
-			sizeof(prGlueInfo->prAdapter->tx_done_fail_count));
-		prGlueInfo->prAdapter->total_tx_done_fail_count = 0;
-
-		kalMemSet(prGlueInfo->prAdapter->deauth_rx_count, 0,
-			sizeof(prGlueInfo->prAdapter->deauth_rx_count));
-		prGlueInfo->prAdapter->total_deauth_rx_count = 0;
-
-		prGlueInfo->prAdapter->total_scandone_timeout_count = 0;
-		prGlueInfo->prAdapter->total_mgmtTX_timeout_count = 0;
-		prGlueInfo->prAdapter->total_mgmtRX_timeout_count = 0;
-	}
-#endif /* fos_change end */
 
 	return 0;		/* success */
 }				/* end of wlanOpen() */
@@ -2347,7 +2208,6 @@ static int wlanOpen(struct net_device *prDev)
 static int wlanStop(struct net_device *prDev)
 {
 	struct GLUE_INFO *prGlueInfo = NULL;
-	uint8_t fgNeedAbortScan = FALSE;
 
 	GLUE_SPIN_LOCK_DECLARATION();
 
@@ -2355,111 +2215,23 @@ static int wlanStop(struct net_device *prDev)
 
 	prGlueInfo = *((struct GLUE_INFO **) netdev_priv(prDev));
 
-	if (!prGlueInfo) {
-		DBGLOG(INIT, WARN, "driver is not ready, prGlueInfo is NULL\n");
-	} else if (prGlueInfo->u4ReadyFlag == 0) {
-		DBGLOG(INIT, WARN, "driver is not ready, u4ReadyFlag = 0\n");
+	/* CFG80211 down */
+	GLUE_ACQUIRE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
+	if (prGlueInfo->prScanRequest) {
+		kalCfg80211ScanDone(prGlueInfo->prScanRequest, TRUE);
 		prGlueInfo->prScanRequest = NULL;
-	} else {
-		/* CFG80211 down, report to kernel directly and run normal
-		*  scan abort procedure
-		*/
-		GLUE_ACQUIRE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
-		if (prGlueInfo->prScanRequest) {
-			DBGLOG(INIT, INFO, "wlanStop abort scan!\n");
-			kalCfg80211ScanDone(prGlueInfo->prScanRequest, TRUE);
-			prGlueInfo->prScanRequest = NULL;
-			fgNeedAbortScan = TRUE;
-		}
-		GLUE_RELEASE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
-		if (fgNeedAbortScan)
-			aisFsmStateAbort_SCAN(prGlueInfo->prAdapter,
-							wlanGetBssIdx(prDev));
 	}
+	GLUE_RELEASE_SPIN_LOCK(prGlueInfo, SPIN_LOCK_NET_DEV);
 
 	netif_tx_stop_all_queues(prDev);
 
-	return 0;		/* success */
-}				/* end of wlanStop() */
-
-void wlanUpdateChannelFlagByBand(struct GLUE_INFO *prGlueInfo,
-				enum ENUM_BAND eBand)
-{
-	uint8_t i, j;
-	uint8_t ucNumOfChannel;
-	struct RF_CHANNEL_INFO aucChannelList[MAX_PER_BAND_CHN_NUM];
-
-	kalMemZero(aucChannelList, sizeof(aucChannelList));
-
-	/* 2. Get current domain channel list */
-	rlmDomainGetChnlList(prGlueInfo->prAdapter,
-			eBand, FALSE, MAX_PER_BAND_CHN_NUM,
-			&ucNumOfChannel, aucChannelList);
-
-	/* 3. Enable specific channel based on domain channel list */
-	for (i = 0; i < ucNumOfChannel; i++) {
-		switch (aucChannelList[i].eBand) {
-		case BAND_2G4:
-			for (j = 0; j < ARRAY_SIZE(mtk_2ghz_channels); j++) {
-				if (mtk_2ghz_channels[j].hw_value ==
-					aucChannelList[i].ucChannelNum) {
-					mtk_2ghz_channels[j].flags &=
-						~IEEE80211_CHAN_DISABLED;
-					mtk_2ghz_channels[j].orig_flags &=
-						~IEEE80211_CHAN_DISABLED;
-					break;
-				}
-			}
-			break;
-
-		case BAND_5G:
-			for (j = 0; j < ARRAY_SIZE(mtk_5ghz_channels); j++) {
-				if (mtk_5ghz_channels[j].hw_value ==
-					aucChannelList[i].ucChannelNum) {
-					mtk_5ghz_channels[j].flags &=
-						~IEEE80211_CHAN_DISABLED;
-					mtk_5ghz_channels[j].orig_flags &=
-						~IEEE80211_CHAN_DISABLED;
-					mtk_5ghz_channels[j].dfs_state =
-					    (aucChannelList[i].eDFS
-						!= NL80211_DFS_USABLE) ?
-					     NL80211_DFS_USABLE :
-					     NL80211_DFS_UNAVAILABLE;
-
-					if (mtk_5ghz_channels[j].dfs_state ==
-						NL80211_DFS_USABLE)
-						mtk_5ghz_channels[j].flags |=
-							IEEE80211_CHAN_RADAR;
-					else
-						mtk_5ghz_channels[j].flags &=
-							~IEEE80211_CHAN_RADAR;
-					break;
-				}
-			}
-			break;
-
-#if (CFG_SUPPORT_WIFI_6G == 1)
-		case BAND_6G:
-			for (j = 0; j < ARRAY_SIZE(mtk_6ghz_channels); j++) {
-				if (mtk_6ghz_channels[j].hw_value ==
-					aucChannelList[i].ucChannelNum) {
-					mtk_6ghz_channels[j].flags &=
-						~IEEE80211_CHAN_DISABLED;
-					mtk_6ghz_channels[j].orig_flags
-						&= ~IEEE80211_CHAN_DISABLED;
-					break;
-				}
-			}
-			break;
+#if CFG_SUPPORT_RX_GRO
+	kalNapiRxDirectUninit(prDev);
+	kalNapiDisable(prDev);
 #endif
 
-		default:
-			DBGLOG(INIT, WARN, "Unknown band %d\n",
-				aucChannelList[i].eBand);
-			break;
-		}
-	}
-}
+	return 0;		/* success */
+}				/* end of wlanStop() */
 
 /*----------------------------------------------------------------------------*/
 /*!
@@ -2473,8 +2245,14 @@ void wlanUpdateChannelFlagByBand(struct GLUE_INFO *prGlueInfo,
 /*----------------------------------------------------------------------------*/
 void wlanUpdateChannelTable(struct GLUE_INFO *prGlueInfo)
 {
-	uint8_t i;
-	uint8_t ucBandIdx;
+	uint8_t i, j;
+	uint8_t ucNumOfChannel;
+	uint32_t u4BandIdx;
+
+	struct RF_CHANNEL_INFO aucChannelList[MAX_PER_BAND_CHN_NUM];
+
+	kalMemZero(aucChannelList,
+		sizeof(struct RF_CHANNEL_INFO) * MAX_PER_BAND_CHN_NUM);
 
 	/* 1. Disable all channels */
 	for (i = 0; i < ARRAY_SIZE(mtk_2ghz_channels); i++) {
@@ -2494,8 +2272,75 @@ void wlanUpdateChannelTable(struct GLUE_INFO *prGlueInfo)
 	}
 #endif
 
-	for (ucBandIdx = BAND_2G4; ucBandIdx < BAND_NUM; ucBandIdx++)
-		wlanUpdateChannelFlagByBand(prGlueInfo, ucBandIdx);
+	for (u4BandIdx = BAND_2G4; u4BandIdx < BAND_NUM; u4BandIdx++) {
+		/* 2. Get current domain channel list */
+		rlmDomainGetChnlList(prGlueInfo->prAdapter,
+				     u4BandIdx, FALSE,
+				     MAX_PER_BAND_CHN_NUM,
+				     &ucNumOfChannel, aucChannelList);
+
+		/* 3. Enable specific channel based on domain channel list */
+		for (i = 0; i < ucNumOfChannel; i++) {
+			switch (aucChannelList[i].eBand) {
+			case BAND_2G4:
+				for (j = 0; j <
+					ARRAY_SIZE(mtk_2ghz_channels); j++) {
+					if (mtk_2ghz_channels[j].hw_value ==
+					    aucChannelList[i].ucChannelNum) {
+						mtk_2ghz_channels[j].flags &=
+						~IEEE80211_CHAN_DISABLED;
+						mtk_2ghz_channels[j].orig_flags
+						&= ~IEEE80211_CHAN_DISABLED;
+						break;
+					}
+				}
+				break;
+
+			case BAND_5G:
+				for (j = 0; j <
+					ARRAY_SIZE(mtk_5ghz_channels); j++) {
+					if (mtk_5ghz_channels[j].hw_value ==
+					    aucChannelList[i].ucChannelNum) {
+						mtk_5ghz_channels[j].flags &=
+						~IEEE80211_CHAN_DISABLED;
+						mtk_5ghz_channels[j].orig_flags
+						&= ~IEEE80211_CHAN_DISABLED;
+						mtk_5ghz_channels[j].dfs_state =
+						(aucChannelList[i].eDFS != 0) ?
+							NL80211_DFS_USABLE :
+							NL80211_DFS_UNAVAILABLE;
+						break;
+					}
+				}
+				break;
+
+#if (CFG_SUPPORT_WIFI_6G == 1)
+			case BAND_6G:
+				for (j = 0; j <
+					ARRAY_SIZE(mtk_6ghz_channels); j++) {
+					if (mtk_6ghz_channels[j].hw_value ==
+					aucChannelList[i].ucChannelNum) {
+						mtk_6ghz_channels[j].flags &=
+						~IEEE80211_CHAN_DISABLED;
+						mtk_6ghz_channels[j].orig_flags
+						&= ~IEEE80211_CHAN_DISABLED;
+						mtk_6ghz_channels[j].dfs_state =
+						(aucChannelList[i].eDFS != 0) ?
+							NL80211_DFS_USABLE :
+							NL80211_DFS_UNAVAILABLE;
+						break;
+					}
+				}
+				break;
+#endif
+
+			default:
+				DBGLOG(INIT, WARN, "Unknown band %d\n",
+				       aucChannelList[i].eBand);
+				break;
+			}
+		}
+	}
 }
 
 #if CFG_SUPPORT_SAP_DFS_CHANNEL
@@ -2505,7 +2350,7 @@ static u_int8_t wlanIsAdjacentChnl(struct GL_P2P_INFO *prGlueP2pInfo,
 		enum ENUM_BAND eBand)
 {
 	uint32_t u4AdjacentFreq = 0;
-	uint32_t u4BandWidth = 20;
+	uint32_t u4BandWidth;
 	uint32_t u4StartFreq, u4EndFreq;
 	struct ieee80211_channel *chnl = NULL;
 
@@ -2536,14 +2381,8 @@ static u_int8_t wlanIsAdjacentChnl(struct GL_P2P_INFO *prGlueP2pInfo,
 	case VHT_OP_CHANNEL_WIDTH_80:
 		u4BandWidth = 80;
 		break;
-	case VHT_OP_CHANNEL_WIDTH_160:
-		u4BandWidth = 160;
-		break;
-	case VHT_OP_CHANNEL_WIDTH_320:
-		u4BandWidth = 320;
-		break;
 	default:
-		DBGLOG(INIT, WARN, "unsupported bandwidth: %d", ucBandWidth);
+		DBGLOG(INIT, WARN, "unsupported bandwidth!");
 		return FALSE;
 	}
 	u4StartFreq = u4CenterFreq - u4BandWidth / 2 + 10;
@@ -2586,8 +2425,6 @@ void wlanUpdateDfsChannelTable(struct GLUE_INFO *prGlueInfo,
 
 	if (ucRoleIdx < KAL_P2P_NUM)
 		prGlueP2pInfo = prGlueInfo->prP2PInfo[ucRoleIdx];
-	else
-		prGlueP2pInfo = prGlueInfo->prP2PInfo[0];
 
 	/* 2. Enable specific channel based on domain channel list */
 	for (i = 0; i < ucNumOfChannel; i++) {
@@ -2653,7 +2490,7 @@ static int32_t wlanNetRegister(struct wireless_dev *prWdev)
 		if (!prWdev)
 			break;
 
-		WIPHY_PRIV(prWdev->wiphy, prGlueInfo);
+		prGlueInfo = (struct GLUE_INFO *) wiphy_priv(prWdev->wiphy);
 		prAdapter = prGlueInfo->prAdapter;
 		i4DevIdx = wlanGetDevIdx(prWdev->netdev);
 		if (i4DevIdx < 0) {
@@ -2673,12 +2510,6 @@ static int32_t wlanNetRegister(struct wireless_dev *prWdev)
 #if CFG_ENABLE_UNIFY_WIPHY
 			prNetDevPrivate->ucIsP2p = FALSE;
 #endif
-#if CFG_MTK_MDDP_SUPPORT
-			/* support both wlan0 and wlan1 */
-			prNetDevPrivate->ucMddpSupport = TRUE;
-#else
-			prNetDevPrivate->ucMddpSupport = FALSE;
-#endif
 			wlanBindBssIdxToNetInterface(prGlueInfo,
 				     u4Idx,
 				     (void *)gprWdev[u4Idx]->netdev);
@@ -2694,26 +2525,11 @@ static int32_t wlanNetRegister(struct wireless_dev *prWdev)
 				wlanClearDevIdx(
 					gprWdev[u4Idx]->netdev);
 				i4DevIdx = -1;
-				break;
 			}
 		}
 
 		if (i4DevIdx != -1)
 			prGlueInfo->fgIsRegistered = TRUE;
-		else {
-			/* Unregister the registered netdev if one of netdev
-			 * registered fail
-			 */
-			for (u4Idx = 0; u4Idx < KAL_AIS_NUM; u4Idx++) {
-				if (!gprWdev[u4Idx] || !gprWdev[u4Idx]->netdev)
-					continue;
-				if (gprWdev[u4Idx]->netdev->reg_state !=
-						NETREG_REGISTERED)
-					continue;
-				wlanClearDevIdx(gprWdev[u4Idx]->netdev);
-				unregister_netdev(gprWdev[u4Idx]->netdev);
-			}
-		}
 	} while (FALSE);
 
 	return i4DevIdx;	/* success */
@@ -2738,7 +2554,7 @@ static void wlanNetUnregister(struct wireless_dev *prWdev)
 		return;
 	}
 
-	WIPHY_PRIV(prWdev->wiphy, prGlueInfo);
+	prGlueInfo = (struct GLUE_INFO *) wiphy_priv(prWdev->wiphy);
 
 #if !CFG_SUPPORT_PERSIST_NETDEV
 	{
@@ -2754,6 +2570,7 @@ static void wlanNetUnregister(struct wireless_dev *prWdev)
 		prGlueInfo->fgIsRegistered = FALSE;
 	}
 #endif
+
 }				/* end of wlanNetUnregister() */
 
 static const struct net_device_ops wlan_netdev_ops = {
@@ -2791,8 +2608,10 @@ static void wlanNvramUpdateOnTestMode(void)
 	struct REG_INFO *prRegInfo = NULL;
 	struct ADAPTER *prAdapter = NULL;
 
+
 	/* <1> Sanity Check */
-	if (u4WlanDevNum == 0) {
+	if ((u4WlanDevNum == 0)
+		&& (u4WlanDevNum > CFG_MAX_WLAN_DEVICES)) {
 		DBGLOG(INIT, ERROR,
 			   "wlanNvramUpdateOnTestMode invalid!!\n");
 		return;
@@ -2800,25 +2619,25 @@ static void wlanNvramUpdateOnTestMode(void)
 
 	prGlueInfo = wlanGetGlueInfo();
 	if (prGlueInfo == NULL) {
-		DBGLOG(INIT, WARN,
+		DBGLOG(INIT, ERROR,
 			   "prGlueInfo invalid!!\n");
 		return;
 	}
 	prAdapter = prGlueInfo->prAdapter;
 	if (prAdapter == NULL) {
-		DBGLOG(INIT, WARN,
+		DBGLOG(INIT, ERROR,
 			   "prAdapter invalid!!\n");
 		return;
 	}
 	prRegInfo = &prGlueInfo->rRegInfo;
 	if (prRegInfo == NULL) {
-		DBGLOG(INIT, WARN,
+		DBGLOG(INIT, ERROR,
 			   "prRegInfo invalid!!\n");
 		return;
 	}
 
 	if (prAdapter->fgTestMode == FALSE) {
-		DBGLOG(INIT, INFO,
+		DBGLOG(INIT, ERROR,
 			   "by-pass on Normal mode\n");
 		return;
 	}
@@ -2835,12 +2654,15 @@ static void wlanNvramUpdateOnTestMode(void)
 			DBGLOG(INIT, WARN, "%s: load manufacture data fail\n",
 					   __func__);
 	}
+
+
 }
 static uint8_t wlanNvramBufHandler(void *ctx,
 			const char *buf,
 			uint16_t length)
 {
-	DBGLOG(INIT, INFO, "buf = %p, length = %u\n", buf, length);
+
+	DBGLOG(INIT, ERROR, "buf = %p, length = %u\n", buf, length);
 	if (buf == NULL || length <= 0)
 		return -EFAULT;
 
@@ -2851,7 +2673,6 @@ static uint8_t wlanNvramBufHandler(void *ctx,
 	}
 
 	kalMemZero(&g_aucNvram, sizeof(g_aucNvram));
-	kalMemZero(&g_aucNvram_OnlyPreCal, sizeof(g_aucNvram_OnlyPreCal));
 	if (copy_from_user(g_aucNvram, buf, length)) {
 		DBGLOG(INIT, ERROR, "copy nvram fail\n");
 		g_NvramFsm = NVRAM_STATE_INIT;
@@ -2874,7 +2695,6 @@ static void wlanCreateWirelessDevice(void)
 	struct wireless_dev *prWdev[KAL_AIS_NUM] = {NULL};
 	unsigned int u4SupportSchedScanFlag = 0;
 	uint32_t u4Idx = 0;
-	struct GLUE_INFO *prGlueInfo = NULL;
 
 	/* 4 <1.1> Create wireless_dev */
 	for (u4Idx = 0; u4Idx < KAL_AIS_NUM; u4Idx++) {
@@ -2889,10 +2709,10 @@ static void wlanCreateWirelessDevice(void)
 	}
 	/* 4 <1.2> Create wiphy */
 #if CFG_ENABLE_UNIFY_WIPHY
-	prWiphy = wiphy_new(&mtk_cfg_ops, sizeof(struct GLUE_INFO *));
+	prWiphy = wiphy_new(&mtk_cfg_ops, sizeof(struct GLUE_INFO));
 #else
 	prWiphy = wiphy_new(&mtk_wlan_ops,
-			    sizeof(struct GLUE_INFO *));
+			    sizeof(struct GLUE_INFO));
 #endif
 
 	if (!prWiphy) {
@@ -2900,16 +2720,6 @@ static void wlanCreateWirelessDevice(void)
 		       "Allocating memory to wiphy device failed\n");
 		goto free_wdev;
 	}
-
-	/* Allocate GLUE_INFO and set priv as pointer to glue structure */
-	prGlueInfo = kalMemAlloc(sizeof(struct GLUE_INFO), VIR_MEM_TYPE);
-	if (!prGlueInfo) {
-		DBGLOG(INIT, ERROR,
-		       "Allocating memory to GLUE_INFO failed\n");
-		goto free_wiphy;
-	}
-	kalMemSet(prGlueInfo, 0, sizeof(struct GLUE_INFO));
-	*((struct GLUE_INFO **) wiphy_priv(prWiphy)) = prGlueInfo;
 
 	/* 4 <1.3> configure wireless_dev & wiphy */
 	prWiphy->iface_combinations = p_mtk_iface_combinations_sta;
@@ -2948,10 +2758,14 @@ static void wlanCreateWirelessDevice(void)
 	prWiphy->signal_type = CFG80211_SIGNAL_TYPE_MBM;
 	prWiphy->cipher_suites = (const u32 *)mtk_cipher_suites;
 	prWiphy->n_cipher_suites = ARRAY_SIZE(mtk_cipher_suites);
+#if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
+	prWiphy->akm_suites = (const u32 *)mtk_akm_suites;
+	prWiphy->n_akm_suites = ARRAY_SIZE(mtk_akm_suites);
+#endif
 	prWiphy->flags = WIPHY_FLAG_HAS_REMAIN_ON_CHANNEL
 			| u4SupportSchedScanFlag;
 
-#if (CFG_SUPPORT_ROAMING == 1)
+#if (CFG_SUPPORT_ROAMING == 1) && (CFG_SUPPORT_SUPPLICANT_SME == 0)
 	prWiphy->flags |= WIPHY_FLAG_SUPPORTS_FW_ROAM;
 #endif /* CFG_SUPPORT_ROAMING */
 
@@ -2965,6 +2779,10 @@ static void wlanCreateWirelessDevice(void)
 	prWiphy->max_num_csa_counters = 2;
 #endif
 #endif /* CFG_SUPPORT_DFS_MASTER */
+#endif
+
+#if (CFG_SUPPORT_SUPPLICANT_SME == 1)
+	prWiphy->features |= NL80211_FEATURE_SAE;
 #endif
 
 #if KERNEL_VERSION(3, 14, 0) < CFG80211_VERSION_CODE
@@ -2985,22 +2803,7 @@ static void wlanCreateWirelessDevice(void)
 	prWiphy->features |= NL80211_FEATURE_SCHED_SCAN_RANDOM_MAC_ADDR;
 #endif
 
-#if KERNEL_VERSION(4, 10, 0) < CFG80211_VERSION_CODE
-	wiphy_ext_feature_set(prWiphy, NL80211_EXT_FEATURE_LOW_SPAN_SCAN);
-	wiphy_ext_feature_set(prWiphy,
-		NL80211_EXT_FEATURE_FILS_MAX_CHANNEL_TIME);
-	wiphy_ext_feature_set(prWiphy,
-		NL80211_EXT_FEATURE_ACCEPT_BCAST_PROBE_RESP);
-	wiphy_ext_feature_set(prWiphy,
-		NL80211_EXT_FEATURE_OCE_PROBE_REQ_HIGH_TX_RATE);
-	wiphy_ext_feature_set(prWiphy,
-		NL80211_EXT_FEATURE_OCE_PROBE_REQ_DEFERRAL_SUPPRESSION);
-#endif
 	prWiphy->features |= NL80211_FEATURE_INACTIVITY_TIMER;
-
-#if CFG_SUPPORT_WPA3
-	prWiphy->features |= NL80211_FEATURE_SAE;
-#endif
 #if KERNEL_VERSION(3, 18, 0) <= CFG80211_VERSION_CODE
 	prWiphy->vendor_commands = mtk_wlan_vendor_ops;
 	prWiphy->n_vendor_commands = sizeof(mtk_wlan_vendor_ops) /
@@ -3038,17 +2841,28 @@ static void wlanCreateWirelessDevice(void)
 
 	prWiphy->interface_modes |= BIT(NL80211_IFTYPE_AP) |
 				    BIT(NL80211_IFTYPE_P2P_CLIENT) |
-				    BIT(NL80211_IFTYPE_P2P_GO) |
-#ifdef CFG_SUPPORT_SNIFFER_RADIOTAP
+#if (CFG_SUPPORT_SNIFFER_RADIOTAP == 1)
 				    BIT(NL80211_IFTYPE_MONITOR) |
 #endif
+				    BIT(NL80211_IFTYPE_P2P_GO) |
 				    BIT(NL80211_IFTYPE_STATION);
 	prWiphy->software_iftypes |= BIT(NL80211_IFTYPE_P2P_DEVICE);
-	prWiphy->flags |= WIPHY_FLAG_HAS_REMAIN_ON_CHANNEL;
-	prWiphy->flags |= WIPHY_FLAG_HAVE_AP_SME;
+	prWiphy->flags |= WIPHY_FLAG_HAS_REMAIN_ON_CHANNEL |
+			  WIPHY_FLAG_HAVE_AP_SME;
 	prWiphy->ap_sme_capa = 1;
 #endif
-
+/*[TODO] remove this CFG when SAE is implemented
+* on driver-SME arch and default enabled
+*/
+#if (CFG_SUPPORT_SUPPLICANT_SME == 1)
+	/*Support SAE*/
+	prWiphy->features |= NL80211_FEATURE_SAE;
+#if CFG_SUPPORT_802_11R
+	prWiphy->features |= NL80211_FEATURE_DS_PARAM_SET_IE_IN_PROBES;
+	prWiphy->features |= NL80211_FEATURE_QUIET;
+	prWiphy->features |= NL80211_FEATURE_TX_POWER_INSERTION;
+#endif
+#endif
 #if CFG_ENABLE_OFFCHANNEL_TX
 	prWiphy->flags |= WIPHY_FLAG_OFFCHAN_TX;
 #endif /* CFG_ENABLE_OFFCHANNEL_TX */
@@ -3063,7 +2877,7 @@ static void wlanCreateWirelessDevice(void)
 
 	if (wiphy_register(prWiphy) < 0) {
 		DBGLOG(INIT, ERROR, "wiphy_register error\n");
-		goto free_glue_info;
+		goto free_wiphy;
 	}
 	for (u4Idx = 0; u4Idx < KAL_AIS_NUM; u4Idx++) {
 		prWdev[u4Idx]->wiphy = prWiphy;
@@ -3076,8 +2890,6 @@ static void wlanCreateWirelessDevice(void)
 	DBGLOG(INIT, INFO, "Create wireless device success\n");
 	return;
 
-free_glue_info:
-	kalMemFree(prGlueInfo, VIR_MEM_TYPE, sizeof(struct GLUE_INFO));
 free_wiphy:
 	wiphy_free(prWiphy);
 free_wdev:
@@ -3097,7 +2909,6 @@ free_wdev:
 /*----------------------------------------------------------------------------*/
 static void wlanDestroyAllWdev(void)
 {
-	struct GLUE_INFO *prGlueInfo = NULL;
 #if CFG_ENABLE_UNIFY_WIPHY
 	/* There is only one wiphy, avoid that double free the wiphy */
 	struct wiphy *wiphy = NULL;
@@ -3105,9 +2916,6 @@ static void wlanDestroyAllWdev(void)
 #if CFG_ENABLE_WIFI_DIRECT
 	int i = 0;
 #endif
-
-	WIPHY_PRIV(wlanGetWiphy(), prGlueInfo);
-	kalMemFree(prGlueInfo, VIR_MEM_TYPE, sizeof(struct GLUE_INFO));
 
 #if CFG_ENABLE_WIFI_DIRECT
 	/* free P2P wdev */
@@ -3128,8 +2936,8 @@ static void wlanDestroyAllWdev(void)
 		 * unregister_netdev/mtk_vif_destructor. And gprP2pRoleWdev[i]
 		 * is reset as gprP2pWdev in mtk_vif_destructor.
 		 */
-		if (gprP2pRoleWdev[i] == gprP2pWdev[i])
-			gprP2pWdev[i] = NULL;
+		if (gprP2pRoleWdev[i] == gprP2pWdev)
+			gprP2pWdev = NULL;
 
 #if CFG_ENABLE_UNIFY_WIPHY
 		wiphy = gprP2pRoleWdev[i]->wiphy;
@@ -3143,23 +2951,21 @@ static void wlanDestroyAllWdev(void)
 		gprP2pRoleWdev[i] = NULL;
 	}
 
-	/* This case is that gprP2pWdev isn't equal to gprP2pRoleWdev[0]
-	 * . The gprP2pRoleWdev[0] is created in the p2p cfg80211 add
-	 * iface ops. The two wdev use the same wiphy. Don't double
-	 * free the same wiphy.
-	 * This part isn't expect occur. Because p2pNetUnregister should
-	 * unregister_netdev the new created wdev, and gprP2pRoleWdev[0]
-	 * is reset as gprP2pWdev.
-	 */
-	for (i = 0; i < KAL_P2P_NUM; i++) {
-		if (gprP2pWdev[i] != NULL) {
+	if (gprP2pWdev != NULL) {
+		/* This case is that gprP2pWdev isn't equal to gprP2pRoleWdev[0]
+		 * . The gprP2pRoleWdev[0] is created in the p2p cfg80211 add
+		 * iface ops. The two wdev use the same wiphy. Don't double
+		 * free the same wiphy.
+		 * This part isn't expect occur. Because p2pNetUnregister should
+		 * unregister_netdev the new created wdev, and gprP2pRoleWdev[0]
+		 * is reset as gprP2pWdev.
+		 */
 #if CFG_ENABLE_UNIFY_WIPHY
-			wiphy = gprP2pWdev[i]->wiphy;
+		wiphy = gprP2pWdev->wiphy;
 #endif
 
-			kfree(gprP2pWdev[i]);
-			gprP2pWdev[i] = NULL;
-		}
+		kfree(gprP2pWdev);
+		gprP2pWdev = NULL;
 	}
 #endif	/* CFG_ENABLE_WIFI_DIRECT */
 
@@ -3195,25 +3001,25 @@ static void wlanDestroyAllWdev(void)
 
 void wlanWakeLockInit(struct GLUE_INFO *prGlueInfo)
 {
-#ifdef CONFIG_ANDROID
-	KAL_WAKE_LOCK_INIT(NULL, prGlueInfo->rIntrWakeLock,
+#if CFG_ENABLE_WAKE_LOCK
+	KAL_WAKE_LOCK_INIT(NULL, prGlueInfo->prIntrWakeLock,
 			   "WLAN interrupt");
-	KAL_WAKE_LOCK_INIT(NULL, prGlueInfo->rTimeoutWakeLock,
+	KAL_WAKE_LOCK_INIT(NULL, prGlueInfo->prTimeoutWakeLock,
 			   "WLAN timeout");
 #endif
 }
 
 void wlanWakeLockUninit(struct GLUE_INFO *prGlueInfo)
 {
-#if defined(CONFIG_ANDROID) && (CFG_ENABLE_WAKE_LOCK)
-	if (KAL_WAKE_LOCK_ACTIVE(NULL, prGlueInfo->rIntrWakeLock))
-		KAL_WAKE_UNLOCK(NULL, prGlueInfo->rIntrWakeLock);
-	KAL_WAKE_LOCK_DESTROY(NULL, prGlueInfo->rIntrWakeLock);
+#if CFG_ENABLE_WAKE_LOCK
+	if (KAL_WAKE_LOCK_ACTIVE(NULL, prGlueInfo->prIntrWakeLock))
+		KAL_WAKE_UNLOCK(NULL, prGlueInfo->prIntrWakeLock);
+	KAL_WAKE_LOCK_DESTROY(NULL, prGlueInfo->prIntrWakeLock);
 
 	if (KAL_WAKE_LOCK_ACTIVE(NULL,
-				 prGlueInfo->rTimeoutWakeLock))
-		KAL_WAKE_UNLOCK(NULL, prGlueInfo->rTimeoutWakeLock);
-	KAL_WAKE_LOCK_DESTROY(NULL, prGlueInfo->rTimeoutWakeLock);
+				 prGlueInfo->prTimeoutWakeLock))
+		KAL_WAKE_UNLOCK(NULL, prGlueInfo->prTimeoutWakeLock);
+	KAL_WAKE_LOCK_DESTROY(NULL, prGlueInfo->prTimeoutWakeLock);
 #endif
 }
 
@@ -3231,7 +3037,7 @@ void wlanWakeLockUninit(struct GLUE_INFO *prGlueInfo)
  */
 /*----------------------------------------------------------------------------*/
 static struct lock_class_key rSpinKey[SPIN_LOCK_NUM];
-struct wireless_dev *wlanNetCreate(void *pvData,
+static struct wireless_dev *wlanNetCreate(void *pvData,
 		void *pvDriverData)
 {
 	struct wireless_dev *prWdev = gprWdev[0];
@@ -3292,7 +3098,7 @@ struct wireless_dev *wlanNetCreate(void *pvData,
 	set_wiphy_dev(prWdev->wiphy, prDev);
 
 	/* 4 <2> Create Glue structure */
-	WIPHY_PRIV(prWdev->wiphy, prGlueInfo);
+	prGlueInfo = (struct GLUE_INFO *) wiphy_priv(prWdev->wiphy);
 	kalMemZero(prGlueInfo, sizeof(struct GLUE_INFO));
 
 	/* 4 <2.1> Create Adapter structure */
@@ -3306,17 +3112,9 @@ struct wireless_dev *wlanNetCreate(void *pvData,
 		return NULL;
 	}
 
-	DBGLOG(INIT, INFO, "Adapter allocated: %px\n",
-			prAdapter);
-	if (prGlueInfo->prAdapter)
-		DBGLOG(INIT, WARN, "Adapter is not null: %px\n",
-			prGlueInfo->prAdapter);
-
 	prChipInfo = ((struct mt66xx_hif_driver_data *)
 		      pvDriverData)->chip_info;
 	prAdapter->chip_info = prChipInfo;
-	prAdapter->fw_flavor = ((struct mt66xx_hif_driver_data *)
-		pvDriverData)->fw_flavor;
 	prGlueInfo->prAdapter = prAdapter;
 
 	/* 4 <3> Initialize Glue structure */
@@ -3369,7 +3167,7 @@ struct wireless_dev *wlanNetCreate(void *pvData,
 		 * after we stopped queue
 		 */
 		prDevHandler->tx_queue_len = 3000;
-		DBGLOG(INIT, TRACE, "net_device prDev(0x%p) allocated\n",
+		DBGLOG(INIT, INFO, "net_device prDev(0x%p) allocated\n",
 			prDevHandler);
 
 		/* 4 <3.1.1> Initialize net device varaiables */
@@ -3408,6 +3206,7 @@ struct wireless_dev *wlanNetCreate(void *pvData,
 	}
 
 	prGlueInfo->prDevHandler = gprWdev[0]->netdev;
+
 	prGlueInfo->ePowerState = ParamDeviceStateD0;
 #if !CFG_SUPPORT_PERSIST_NETDEV
 	prGlueInfo->fgIsRegistered = FALSE;
@@ -3445,8 +3244,10 @@ struct wireless_dev *wlanNetCreate(void *pvData,
 		lockdep_set_class(&prGlueInfo->rSpinLock[i], &rSpinKey[i]);
 	}
 
-	for (i = 0; i < MUTEX_NUM; i++)
+	for (i = 0; i < MUTEX_NUM; i++) {
 		mutex_init(&prGlueInfo->arMutex[i]);
+		lockdep_set_subclass(&prGlueInfo->arMutex[i], i);
+	}
 
 	/* initialize semaphore for ioctl */
 	sema_init(&prGlueInfo->ioctl_sem, 1);
@@ -3477,12 +3278,23 @@ struct wireless_dev *wlanNetCreate(void *pvData,
 	prGlueInfo->u4HifThreadPid = 0xffffffff;
 #endif
 
+#if CFG_SUPPORT_CSI
+	/* init CSI wait queue  */
+	init_waitqueue_head(&(prGlueInfo->prAdapter->rCSIInfo.waitq));
+#endif
+
+
+#if CFG_ASSERT_DUMP
+	init_waitqueue_head(&(prGlueInfo->waitq_fwdump));
+	skb_queue_head_init(&(prGlueInfo->rFwDumpSkbQueue));
+#endif
+
 	return prWdev;
 
 netcreate_err:
 	if (prAdapter != NULL) {
 		wlanAdapterDestroy(prAdapter);
-		prAdapter = NULL;
+		prGlueInfo->prAdapter = NULL;
 	}
 	prGlueInfo->prDevHandler = NULL;
 
@@ -3498,7 +3310,7 @@ netcreate_err:
  * \return (none)
  */
 /*----------------------------------------------------------------------------*/
-void wlanNetDestroy(struct wireless_dev *prWdev)
+static void wlanNetDestroy(struct wireless_dev *prWdev)
 {
 	struct GLUE_INFO *prGlueInfo = NULL;
 
@@ -3510,8 +3322,12 @@ void wlanNetDestroy(struct wireless_dev *prWdev)
 	}
 
 	/* prGlueInfo is allocated with net_device */
-	WIPHY_PRIV(prWdev->wiphy, prGlueInfo);
+	prGlueInfo = (struct GLUE_INFO *) wiphy_priv(prWdev->wiphy);
 	ASSERT(prGlueInfo);
+
+#if CFG_ASSERT_DUMP
+	skb_queue_purge(&(prGlueInfo->rFwDumpSkbQueue));
+#endif
 
 	/* prWdev: base AIS dev
 	 * Because the interface dev (ex: usb_device) would be free
@@ -3530,11 +3346,6 @@ void wlanNetDestroy(struct wireless_dev *prWdev)
 
 	glClearHifInfo(prGlueInfo);
 
-	if (prGlueInfo->prAdapter)
-		DBGLOG(INIT, INFO, "Destroy Adapter: %px\n",
-			prGlueInfo->prAdapter);
-	else
-		DBGLOG(INIT, WARN, "Adapter is null\n");
 	wlanAdapterDestroy(prGlueInfo->prAdapter);
 	prGlueInfo->prAdapter = NULL;
 
@@ -3750,10 +3561,10 @@ void reset_p2p_mode(struct GLUE_INFO *prGlueInfo)
 	rWlanStatus = kalIoctl(prGlueInfo, wlanoidSetP2pMode,
 			(void *) &rSetP2P,
 			sizeof(struct PARAM_CUSTOM_P2P_SET_STRUCT),
-			FALSE, FALSE, TRUE, &u4BufLen);
+			FALSE, FALSE, FALSE, &u4BufLen);
 
 	if (rWlanStatus != WLAN_STATUS_SUCCESS)
-		p2pRemove(prGlueInfo);
+		prGlueInfo->prAdapter->fgIsP2PRegistered = FALSE;
 
 	DBGLOG(INIT, INFO,
 			"ret = 0x%08x\n", (uint32_t) rWlanStatus);
@@ -3786,22 +3597,11 @@ int set_p2p_mode_handler(struct net_device *netdev,
 		for (i = 0 ; i < KAL_P2P_NUM; i++) {
 			prP2PInfo = prGlueInfo->prP2PInfo[i];
 
-			if (!prP2PInfo ||
-				!prP2PInfo->aprRoleHandler ||
-				!prP2PInfo->prWdev)
-				continue;
-
-			/* Only restore sap part */
-			if (prP2PInfo->prWdev->iftype != NL80211_IFTYPE_AP)
+			if (!prP2PInfo || !prP2PInfo->prDevHandler)
 				continue;
 
 			g_u4DevIdx[i] =
-				prP2PInfo->aprRoleHandler->ifindex;
-		}
-
-		if (prGlueInfo->prAdapter->rWifiVar.u4RegP2pIfAtProbe) {
-			DBGLOG(INIT, WARN, "Resetting p2p mode at probe\n");
-			return 0;
+				prP2PInfo->prDevHandler->ifindex;
 		}
 	}
 
@@ -3822,7 +3622,7 @@ int set_p2p_mode_handler(struct net_device *netdev,
 	rWlanStatus = kalIoctl(prGlueInfo, wlanoidSetP2pMode,
 			(void *) &rSetP2P,
 			sizeof(struct PARAM_CUSTOM_P2P_SET_STRUCT),
-			FALSE, FALSE, TRUE, &u4BufLen);
+			FALSE, FALSE, FALSE, &u4BufLen);
 
 	DBGLOG(INIT, INFO,
 			"ret = 0x%08x, p2p reg = %d, resetting = %d\n",
@@ -3845,49 +3645,36 @@ int set_p2p_mode_handler(struct net_device *netdev,
 
 #endif
 
-#if CFG_SUPPORT_EASY_DEBUG
-/*----------------------------------------------------------------------------*/
-/*!
- * \brief parse config from wifi.cfg
- *
- * \param[in] prAdapter
- *
- * \retval VOID
- */
-/*----------------------------------------------------------------------------*/
-void wlanGetParseConfig(struct ADAPTER *prAdapter)
+#if CFG_SUPPORT_NAN
+int set_nan_handler(struct net_device *netdev, uint32_t ucEnable)
 {
-	uint8_t *pucConfigBuf;
-	uint32_t u4ConfigReadLen;
+	struct GLUE_INFO *prGlueInfo =
+		*((struct GLUE_INFO **)netdev_priv(netdev));
+	uint32_t rWlanStatus = WLAN_STATUS_SUCCESS;
+	uint32_t u4BufLen = 0;
 
-	wlanCfgInit(prAdapter, NULL, 0, 0);
-	pucConfigBuf = (uint8_t *) kalMemAlloc(
-			       WLAN_CFG_FILE_BUF_SIZE, VIR_MEM_TYPE);
-	kalMemZero(pucConfigBuf, WLAN_CFG_FILE_BUF_SIZE);
-	u4ConfigReadLen = 0;
-	if (pucConfigBuf) {
-		if (kalRequestFirmware("wifi_sigma.cfg", pucConfigBuf,
-			   WLAN_CFG_FILE_BUF_SIZE, &u4ConfigReadLen,
-			   prAdapter->prGlueInfo->prDev) == 0) {
-			/* ToDo:: Nothing */
-		} else if (kalRequestFirmware("wifi.cfg", pucConfigBuf,
-			   WLAN_CFG_FILE_BUF_SIZE, &u4ConfigReadLen,
-			   prAdapter->prGlueInfo->prDev) == 0) {
-			/* ToDo:: Nothing */
-		}
+	if ((!ucEnable) && (kalIsResetting() == FALSE))
+		nanNetUnregister(prGlueInfo, FALSE);
 
-		if (pucConfigBuf[0] != '\0' && u4ConfigReadLen > 0)
-			wlanCfgParse(prAdapter, pucConfigBuf, u4ConfigReadLen,
-				     TRUE);
+	rWlanStatus = kalIoctl(prGlueInfo, wlanoidSetNANMode, (void *)&ucEnable,
+			       sizeof(uint32_t), FALSE, FALSE, TRUE, &u4BufLen);
 
-		kalMemFree(pucConfigBuf, VIR_MEM_TYPE,
-			   WLAN_CFG_FILE_BUF_SIZE);
-	}			/* pucConfigBuf */
+	DBGLOG(INIT, INFO, "set_nan_handler ret = 0x%08lx\n",
+	       (uint32_t)rWlanStatus);
+
+	/* Need to check fgIsNANRegistered, in case of whole chip reset.
+	 * in this case, kalIOCTL return success always,
+	 * and prGlueInfo->prP2PInfo[0] may be NULL
+	 */
+	if ((ucEnable) && (prGlueInfo->prAdapter->fgIsNANRegistered) &&
+	    (kalIsResetting() == FALSE))
+		nanNetRegister(prGlueInfo, FALSE); /* Fixme: error handling */
+
+	return 0;
 }
-
-
 #endif
 
+#if CFG_SUPPORT_CFG_FILE
 /*----------------------------------------------------------------------------*/
 /*!
  * \brief get config from wifi.cfg
@@ -3901,20 +3688,28 @@ void wlanGetConfig(struct ADAPTER *prAdapter)
 {
 	uint8_t *pucConfigBuf;
 	uint32_t u4ConfigReadLen;
-
+#ifndef CFG_WIFI_CFG_FN
+#define WIFI_CFG_FN	"wifi.cfg"
+#else
+#define WIFI_CFG_FN	CFG_WIFI_CFG_FN
+#endif
 	wlanCfgInit(prAdapter, NULL, 0, 0);
 	pucConfigBuf = (uint8_t *) kalMemAlloc(
 			       WLAN_CFG_FILE_BUF_SIZE, VIR_MEM_TYPE);
-	kalMemZero(pucConfigBuf, WLAN_CFG_FILE_BUF_SIZE);
 	u4ConfigReadLen = 0;
 	if (pucConfigBuf) {
-		if (kalRequestFirmware("wifi_sigma.cfg", pucConfigBuf,
+		kalMemZero(pucConfigBuf, WLAN_CFG_FILE_BUF_SIZE);
+		if (kalRequestFirmware(WIFI_CFG_FN, pucConfigBuf,
 			   WLAN_CFG_FILE_BUF_SIZE, &u4ConfigReadLen,
 			   prAdapter->prGlueInfo->prDev) == 0) {
 			/* ToDo:: Nothing */
-		} else if (kalRequestFirmware("wifi.cfg", pucConfigBuf,
-			   WLAN_CFG_FILE_BUF_SIZE, &u4ConfigReadLen,
-			   prAdapter->prGlueInfo->prDev) == 0) {
+		} else if (kalReadToFile("/data/misc/wifi/wifi.cfg",
+			   pucConfigBuf, WLAN_CFG_FILE_BUF_SIZE,
+			   &u4ConfigReadLen) == 0) {
+			/* ToDo:: Nothing */
+		} else if (kalReadToFile("/storage/sdcard0/wifi.cfg",
+			   pucConfigBuf, WLAN_CFG_FILE_BUF_SIZE,
+			   &u4ConfigReadLen) == 0) {
 			/* ToDo:: Nothing */
 		}
 
@@ -3927,6 +3722,7 @@ void wlanGetConfig(struct ADAPTER *prAdapter)
 	}			/* pucConfigBuf */
 }
 
+#endif /* CFG_SUPPORT_CFG_FILE */
 
 /*----------------------------------------------------------------------------*/
 /*!
@@ -3956,6 +3752,13 @@ uint32_t wlanDownloadBufferBin(struct ADAPTER *prAdapter)
 	uint32_t chip_id;
 	uint8_t aucEeprom[32];
 	uint32_t retWlanStat = WLAN_STATUS_FAILURE;
+	int ret;
+
+#if CFG_EFUSE_AUTO_MODE_SUPPORT
+	uint32_t u4Efuse_addr = 0;
+	struct PARAM_CUSTOM_ACCESS_EFUSE *prAccessEfuseInfo
+			= NULL;
+#endif
 
 	if (prAdapter->fgIsSupportPowerOnSendBufferModeCMD ==
 	    TRUE) {
@@ -3981,9 +3784,42 @@ uint32_t wlanDownloadBufferBin(struct ADAPTER *prAdapter)
 		kalMemZero(prSetEfuseBufModeInfo,
 			   sizeof(struct PARAM_CUSTOM_EFUSE_BUFFER_MODE));
 
-		if (prAdapter->rWifiVar.ucEfuseBufferModeCal == TRUE) {
-			int ret = 0;
+#if CFG_EFUSE_AUTO_MODE_SUPPORT
+		/* allocate memory for Access Efuse Info */
+		prAccessEfuseInfo =
+			(struct PARAM_CUSTOM_ACCESS_EFUSE *)
+			kalMemAlloc(sizeof(
+				    struct PARAM_CUSTOM_ACCESS_EFUSE),
+				    VIR_MEM_TYPE);
+		if (prAccessEfuseInfo == NULL)
+			goto label_exit;
+		kalMemZero(prAccessEfuseInfo,
+			   sizeof(struct PARAM_CUSTOM_ACCESS_EFUSE));
 
+		if (prAdapter->rWifiVar.ucEfuseBufferModeCal == LOAD_AUTO) {
+			prAccessEfuseInfo->u4Address = (u4Efuse_addr /
+				EFUSE_BLOCK_SIZE) * EFUSE_BLOCK_SIZE;
+			rStatus = kalIoctl(prGlueInfo,
+				wlanoidQueryProcessAccessEfuseRead,
+				prAccessEfuseInfo,
+				sizeof(struct PARAM_CUSTOM_ACCESS_EFUSE),
+				TRUE, TRUE, TRUE, &u4BufLen);
+			if (prGlueInfo->prAdapter->aucEepromVaule[1]
+				== (chip_id>>8)) {
+				prAdapter->rWifiVar.ucEfuseBufferModeCal
+					= LOAD_EFUSE;
+				DBGLOG(INIT, STATE,
+					"[EFUSE AUTO] EFUSE Mode\n");
+			} else {
+				prAdapter->rWifiVar.ucEfuseBufferModeCal
+					= LOAD_EEPROM_BIN;
+				DBGLOG(INIT, STATE,
+					"[EFUSE AUTO] Buffer Mode\n");
+			}
+		}
+#endif
+		if (prAdapter->rWifiVar.ucEfuseBufferModeCal
+			== LOAD_EEPROM_BIN) {
 			/* Buffer mode */
 			/* Only in buffer mode need to access bin file */
 			/* 1 <1> Load bin file*/
@@ -3997,11 +3833,12 @@ uint32_t wlanDownloadBufferBin(struct ADAPTER *prAdapter)
 			/* 1 <2> Construct EEPROM binary name */
 			kalMemZero(aucEeprom, sizeof(aucEeprom));
 
-			ret = kalSnprintf(aucEeprom, 32, "%s%x.bin",
-				 apucEepromName[0], chip_id);
-			if (ret < 0 || ret >= 32) {
+			ret = kalSnprintf(aucEeprom,
+					sizeof(aucEeprom), "%s%x.bin",
+					apucEepromName[0], chip_id);
+			if (ret == 0 || ret >= sizeof(aucEeprom)) {
 				DBGLOG(INIT, ERROR,
-					"[%u] kalSnprintf failed, ret: %d\n",
+						"[%u] snprintf failed, ret: %d\n",
 						__LINE__, ret);
 				goto label_exit;
 			}
@@ -4030,7 +3867,7 @@ uint32_t wlanDownloadBufferBin(struct ADAPTER *prAdapter)
 #else
 			u4ContentLen = EFUSE_CONTENT_BUFFER_SIZE;
 #endif
-			if (u4ContentLen > MAX_EEPROM_BUFFER_SIZE)
+			if (u4ContentLen > BUFFER_BIN_PAGE_SIZE)
 				goto label_exit;
 			kalMemCopy(prSetEfuseBufModeInfo->aBinContent,
 				   &pucConfigBuf[u2InitAddr], u4ContentLen);
@@ -4067,6 +3904,12 @@ label_exit:
 		kalMemFree(pucConfigBuf, VIR_MEM_TYPE,
 			   MAX_EEPROM_BUFFER_SIZE);
 
+#if CFG_EFUSE_AUTO_MODE_SUPPORT
+	if (prAccessEfuseInfo != NULL)
+		kalMemFree(prAccessEfuseInfo, VIR_MEM_TYPE,
+			sizeof(struct PARAM_CUSTOM_ACCESS_EFUSE));
+#endif
+
 	return retWlanStat;
 }
 
@@ -4094,6 +3937,13 @@ uint32_t wlanConnacDownloadBufferBin(struct ADAPTER
 	uint32_t chip_id;
 	uint8_t aucEeprom[32];
 	uint32_t retWlanStat = WLAN_STATUS_FAILURE;
+	int ret;
+
+#if CFG_EFUSE_AUTO_MODE_SUPPORT
+	uint32_t u4Efuse_addr = 0;
+	struct PARAM_CUSTOM_ACCESS_EFUSE *prAccessEfuseInfo
+			= NULL;
+#endif
 
 	if (prAdapter->fgIsSupportPowerOnSendBufferModeCMD == FALSE)
 		return WLAN_STATUS_SUCCESS;
@@ -4120,9 +3970,43 @@ uint32_t wlanConnacDownloadBufferBin(struct ADAPTER
 	kalMemZero(prSetEfuseBufModeInfo,
 		   sizeof(struct PARAM_CUSTOM_EFUSE_BUFFER_MODE_CONNAC_T));
 
-	if (prAdapter->rWifiVar.ucEfuseBufferModeCal == TRUE) {
-		int ret = 0;
+#if CFG_EFUSE_AUTO_MODE_SUPPORT
+	/* allocate memory for Access Efuse Info */
+	prAccessEfuseInfo =
+		(struct PARAM_CUSTOM_ACCESS_EFUSE *)
+			kalMemAlloc(sizeof(
+				struct PARAM_CUSTOM_ACCESS_EFUSE),
+					VIR_MEM_TYPE);
+	if (prAccessEfuseInfo == NULL)
+		goto label_exit;
+	kalMemZero(prAccessEfuseInfo,
+		sizeof(struct PARAM_CUSTOM_ACCESS_EFUSE));
 
+	if (prAdapter->rWifiVar.ucEfuseBufferModeCal == LOAD_AUTO) {
+		prAccessEfuseInfo->u4Address = (u4Efuse_addr /
+			EFUSE_BLOCK_SIZE) * EFUSE_BLOCK_SIZE;
+		rStatus = kalIoctl(prGlueInfo,
+			wlanoidQueryProcessAccessEfuseRead,
+			prAccessEfuseInfo,
+			sizeof(struct PARAM_CUSTOM_ACCESS_EFUSE),
+			TRUE, TRUE, TRUE, &u4BufLen);
+		if (prGlueInfo->prAdapter->aucEepromVaule[1]
+			== (chip_id>>8)) {
+			prAdapter->rWifiVar.ucEfuseBufferModeCal
+				= LOAD_EFUSE;
+			DBGLOG(INIT, STATE,
+				"[EFUSE AUTO] EFUSE Mode\n");
+		} else {
+			prAdapter->rWifiVar.ucEfuseBufferModeCal
+				= LOAD_EEPROM_BIN;
+			DBGLOG(INIT, STATE,
+				"[EFUSE AUTO] Buffer Mode\n");
+		}
+	}
+#endif
+
+	if (prAdapter->rWifiVar.ucEfuseBufferModeCal
+		== LOAD_EEPROM_BIN) {
 		/* Buffer mode */
 		/* Only in buffer mode need to access bin file */
 		/* 1 <1> Load bin file*/
@@ -4136,11 +4020,11 @@ uint32_t wlanConnacDownloadBufferBin(struct ADAPTER
 		/* 1 <2> Construct EEPROM binary name */
 		kalMemZero(aucEeprom, sizeof(aucEeprom));
 
-		ret = kalSnprintf(aucEeprom, 32, "%s%x.bin",
+		ret = kalSnprintf(aucEeprom, sizeof(aucEeprom), "%s%x.bin",
 			 apucEepromName[0], chip_id);
-		if (ret < 0 || ret >= 32) {
+		if (ret == 0 || ret >= sizeof(aucEeprom)) {
 			DBGLOG(INIT, ERROR,
-				"[%u] kalSnprintf failed, ret: %d\n",
+					"[%u] kalSnprintf failed, ret: %d\n",
 					__LINE__, ret);
 			goto label_exit;
 		}
@@ -4163,7 +4047,7 @@ uint32_t wlanConnacDownloadBufferBin(struct ADAPTER
 		kalMemCopy(uacEEPROMImage, pucConfigBuf,
 			   MAX_EEPROM_BUFFER_SIZE);
 
-		if (u4ContentLen > MAX_EEPROM_BUFFER_SIZE)
+		if (u4ContentLen > BUFFER_BIN_PAGE_SIZE)
 			goto label_exit;
 
 		kalMemCopy(prSetEfuseBufModeInfo->aBinContent, pucConfigBuf,
@@ -4201,8 +4085,225 @@ label_exit:
 		kalMemFree(pucConfigBuf, VIR_MEM_TYPE,
 			   MAX_EEPROM_BUFFER_SIZE);
 
+#if CFG_EFUSE_AUTO_MODE_SUPPORT
+	if (prAccessEfuseInfo != NULL)
+		kalMemFree(prAccessEfuseInfo, VIR_MEM_TYPE,
+			sizeof(struct PARAM_CUSTOM_ACCESS_EFUSE));
+#endif
+
 	return retWlanStat;
 }
+
+/*----------------------------------------------------------------------------*/
+/*!
+ * \brief this function send buffer bin EEPROB_MTxxxx.bin to FW.
+ *
+ * \param[in] prAdapter
+ *
+ * \retval WLAN_STATUS_SUCCESS Success
+ * \retval WLAN_STATUS_FAILURE Failed
+ */
+/*----------------------------------------------------------------------------*/
+uint32_t wlanConnac2XDownloadBufferBin(struct ADAPTER *prAdapter)
+{
+	struct mt66xx_chip_info *prChipInfo = NULL;
+	uint32_t chip_id = 0;
+	struct GLUE_INFO *prGlueInfo = NULL;
+	struct PARAM_CUSTOM_EFUSE_BUFFER_MODE_CONNAC_T
+		*prSetEfuseBufModeInfo = NULL;
+	uint8_t *pucConfigBuf = NULL;
+	uint8_t aucEeprom[32];
+	uint32_t u4ContentLen = 0;
+	uint8_t uTotalPage = 0;
+	uint8_t uPageIdx = 0;
+	uint32_t rStatus = WLAN_STATUS_SUCCESS;
+	uint32_t u4BufLen = 0;
+	uint32_t retWlanStat = WLAN_STATUS_FAILURE;
+
+#if CFG_EFUSE_AUTO_MODE_SUPPORT
+	uint32_t u4Efuse_addr = 0;
+	struct PARAM_CUSTOM_ACCESS_EFUSE *prAccessEfuseInfo
+			= NULL;
+#endif
+
+	if (prAdapter->fgIsSupportPowerOnSendBufferModeCMD == FALSE)
+		return WLAN_STATUS_SUCCESS;
+
+	DBGLOG(INIT, INFO, "Start Efuse Buffer Mode ..\n");
+	DBGLOG(INIT, INFO, "ucEfuseBUfferModeCal is %x\n",
+		prAdapter->rWifiVar.ucEfuseBufferModeCal);
+
+	prChipInfo = prAdapter->chip_info;
+	chip_id = prChipInfo->chip_id;
+	prGlueInfo = prAdapter->prGlueInfo;
+	if (prGlueInfo == NULL || prGlueInfo->prDev == NULL)
+		goto label_exit;
+
+	/* allocate memory for buffer mode info */
+	prSetEfuseBufModeInfo =
+		(struct PARAM_CUSTOM_EFUSE_BUFFER_MODE_CONNAC_T *)
+		kalMemAlloc(sizeof(
+			struct PARAM_CUSTOM_EFUSE_BUFFER_MODE_CONNAC_T),
+			VIR_MEM_TYPE);
+	if (prSetEfuseBufModeInfo == NULL)
+		goto label_exit;
+	kalMemZero(prSetEfuseBufModeInfo,
+		sizeof(struct PARAM_CUSTOM_EFUSE_BUFFER_MODE_CONNAC_T));
+
+#if CFG_EFUSE_AUTO_MODE_SUPPORT
+		/* allocate memory for Access Efuse Info */
+		prAccessEfuseInfo =
+			(struct PARAM_CUSTOM_ACCESS_EFUSE *)
+			kalMemAlloc(sizeof(
+				    struct PARAM_CUSTOM_ACCESS_EFUSE),
+				    VIR_MEM_TYPE);
+		if (prAccessEfuseInfo == NULL)
+			goto label_exit;
+		kalMemZero(prAccessEfuseInfo,
+			   sizeof(struct PARAM_CUSTOM_ACCESS_EFUSE));
+
+		if (prAdapter->rWifiVar.ucEfuseBufferModeCal == LOAD_AUTO) {
+			prAccessEfuseInfo->u4Address = (u4Efuse_addr /
+				EFUSE_BLOCK_SIZE) * EFUSE_BLOCK_SIZE;
+			rStatus = kalIoctl(prGlueInfo,
+				wlanoidQueryProcessAccessEfuseRead,
+				prAccessEfuseInfo,
+				sizeof(struct PARAM_CUSTOM_ACCESS_EFUSE),
+				TRUE, TRUE, TRUE, &u4BufLen);
+			if (prGlueInfo->prAdapter->aucEepromVaule[1]
+				== (chip_id>>8)) {
+				prAdapter->rWifiVar.ucEfuseBufferModeCal
+					= LOAD_EFUSE;
+				DBGLOG(INIT, STATE,
+					"[EFUSE AUTO] EFUSE Mode\n");
+			} else {
+				prAdapter->rWifiVar.ucEfuseBufferModeCal
+					= LOAD_EEPROM_BIN;
+				DBGLOG(INIT, STATE,
+					"[EFUSE AUTO] Buffer Mode\n");
+			}
+		}
+#endif
+
+	if (prAdapter->rWifiVar.ucEfuseBufferModeCal
+		== LOAD_EEPROM_BIN) {
+		/* Buffer mode */
+		/* Only in buffer mode need to access bin file */
+		/* 1 <1> Load bin file*/
+		pucConfigBuf = (uint8_t *)
+			kalMemAlloc(MAX_EEPROM_BUFFER_SIZE, VIR_MEM_TYPE);
+		if (pucConfigBuf == NULL)
+			goto label_exit;
+		kalMemZero(pucConfigBuf, MAX_EEPROM_BUFFER_SIZE);
+
+		/* 1 <2> Construct EEPROM binary name */
+		kalMemZero(aucEeprom, sizeof(aucEeprom));
+		if (prChipInfo->constructBufferBinFileName == NULL) {
+			if (snprintf(aucEeprom, 32, "%s%x.bin",
+				 apucEepromName[0], chip_id) < 0) {
+				DBGLOG(INIT, ERROR, "gen BIN file name fail\n");
+				goto label_exit;
+			}
+		} else {
+			if (prChipInfo->constructBufferBinFileName(
+			    prAdapter, aucEeprom) != WLAN_STATUS_SUCCESS) {
+				DBGLOG(INIT, ERROR, "gen BIN file name fail\n");
+				goto label_exit;
+			}
+		}
+
+		/* 1 <3> Request buffer bin */
+		if (kalRequestFirmware(aucEeprom, pucConfigBuf,
+				MAX_EEPROM_BUFFER_SIZE, &u4ContentLen,
+				prGlueInfo->prDev) == 0) {
+			DBGLOG(INIT, INFO, "request file done\n");
+		} else {
+			DBGLOG(INIT, INFO, "can't find file\n");
+			goto label_exit;
+		}
+		DBGLOG(INIT, INFO, "u4ContentLen = %d\n", u4ContentLen);
+
+		/* 1 <4> Send CMD with bin file content */
+		if (u4ContentLen == 0 || u4ContentLen > MAX_EEPROM_BUFFER_SIZE)
+			goto label_exit;
+
+		/* Update contents in local table */
+		kalMemCopy(uacEEPROMImage, pucConfigBuf,
+			MAX_EEPROM_BUFFER_SIZE);
+
+		uTotalPage = u4ContentLen / BUFFER_BIN_PAGE_SIZE;
+		if ((u4ContentLen % BUFFER_BIN_PAGE_SIZE) == 0)
+			uTotalPage--;
+
+		prSetEfuseBufModeInfo->ucSourceMode = 1;
+	} else {
+		/* eFuse mode */
+		/* Only need to tell FW the content from, contents are directly
+		 * from efuse
+		 */
+		prSetEfuseBufModeInfo->ucSourceMode = 0;
+		u4ContentLen = 0;
+		uTotalPage = 0;
+	}
+
+	for (uPageIdx = 0; uPageIdx <= uTotalPage; uPageIdx++) {
+		/* set format */
+		prSetEfuseBufModeInfo->ucContentFormat = (
+			CONTENT_FORMAT_WHOLE_CONTENT |
+			((uTotalPage << BUFFER_BIN_TOTAL_PAGE_SHIFT)
+				& BUFFER_BIN_TOTAL_PAGE_MASK) |
+			((uPageIdx << BUFFER_BIN_PAGE_INDEX_SHIFT)
+				& BUFFER_BIN_PAGE_INDEX_MASK)
+		);
+		/* set buffer size */
+		prSetEfuseBufModeInfo->u2Count =
+			(u4ContentLen < BUFFER_BIN_PAGE_SIZE ?
+				u4ContentLen : BUFFER_BIN_PAGE_SIZE);
+		/* set buffer */
+		kalMemZero(prSetEfuseBufModeInfo->aBinContent,
+			BUFFER_BIN_PAGE_SIZE);
+		if (prSetEfuseBufModeInfo->u2Count != 0)
+			kalMemCopy(prSetEfuseBufModeInfo->aBinContent,
+				pucConfigBuf + uPageIdx * BUFFER_BIN_PAGE_SIZE,
+				prSetEfuseBufModeInfo->u2Count);
+		/* send buffer */
+		DBGLOG(INIT, INFO, "[%d/%d] load buffer size: 0x%x\n",
+			uPageIdx, uTotalPage, prSetEfuseBufModeInfo->u2Count);
+		rStatus = kalIoctl(prGlueInfo, wlanoidConnacSetEfusBufferMode,
+			(void *) prSetEfuseBufModeInfo, OFFSET_OF(
+				struct PARAM_CUSTOM_EFUSE_BUFFER_MODE_CONNAC_T,
+				aBinContent) + prSetEfuseBufModeInfo->u2Count,
+			FALSE, TRUE, TRUE, &u4BufLen);
+
+		if (rStatus != WLAN_STATUS_SUCCESS) {
+			DBGLOG(INIT, ERROR,
+			       "kalIoctl EXT_CMD_ID_EFUSE_BUFFER_MODE 0x%X\n",
+			       rStatus);
+			goto label_exit;
+		}
+
+		/* update remain size */
+		u4ContentLen -= prSetEfuseBufModeInfo->u2Count;
+	}
+	retWlanStat = WLAN_STATUS_SUCCESS;
+
+label_exit:
+	/* free memory */
+	if (prSetEfuseBufModeInfo != NULL)
+		kalMemFree(prSetEfuseBufModeInfo, VIR_MEM_TYPE,
+			sizeof(struct PARAM_CUSTOM_EFUSE_BUFFER_MODE_CONNAC_T));
+	if (pucConfigBuf != NULL)
+		kalMemFree(pucConfigBuf, VIR_MEM_TYPE, MAX_EEPROM_BUFFER_SIZE);
+
+#if CFG_EFUSE_AUTO_MODE_SUPPORT
+	if (prAccessEfuseInfo != NULL)
+		kalMemFree(prAccessEfuseInfo, VIR_MEM_TYPE,
+			sizeof(struct PARAM_CUSTOM_ACCESS_EFUSE));
+#endif
+
+	return retWlanStat;
+}
+
 #if (CONFIG_WLAN_SERVICE == 1)
 uint32_t wlanServiceInit(struct GLUE_INFO *prGlueInfo)
 {
@@ -4210,7 +4311,6 @@ uint32_t wlanServiceInit(struct GLUE_INFO *prGlueInfo)
 	struct service_test *prServiceTest;
 	struct test_wlan_info *winfos;
 	struct mt66xx_chip_info *prChipInfo;
-	struct ATE_OPS_T *prAteOps = NULL;
 	uint32_t rStatus = WLAN_STATUS_SUCCESS;
 
 	DBGLOG(INIT, TRACE, "%s enter!\n", __func__);
@@ -4250,14 +4350,9 @@ uint32_t wlanServiceInit(struct GLUE_INFO *prGlueInfo)
 			"%s chip_id = 0x%x\n", __func__,
 			prServiceTest->test_winfo->chip_id);
 
-	if (prServiceTest->test_winfo->chip_id == 0x37)	/* 6637 */
-		prServiceTest->test_winfo->chip_cap.support_6g = TRUE;
-	else
-		prServiceTest->test_winfo->chip_cap.support_6g = FALSE;
-
 #if (CFG_MTK_ANDROID_EMI == 1)
-	prServiceTest->test_winfo->emi_phy_base = gConEmiPhyBaseFinal;
-	prServiceTest->test_winfo->emi_phy_size = gConEmiSizeFinal;
+	prServiceTest->test_winfo->emi_phy_base = gConEmiPhyBase;
+	prServiceTest->test_winfo->emi_phy_size = gConEmiSize;
 #else
 	DBGLOG(RFTEST, WARN, "Platform doesn't support EMI address\n");
 #endif
@@ -4268,31 +4363,6 @@ uint32_t wlanServiceInit(struct GLUE_INFO *prGlueInfo)
 		DBGLOG(INIT, WARN,
 			"prServiceTest->test_op memory alloc fail!\n");
 			goto label_exit;
-	}
-
-	/* icap setting */
-	prAteOps = prChipInfo->prAteOps;
-	if (prAteOps != NULL) {
-		prServiceTest->test_winfo->icap_arch
-			= prAteOps->u4Architech;
-		prServiceTest->test_winfo->icap_bitwidth
-			= prAteOps->u4EnBitWidth;
-		prServiceTest->test_winfo->icap_phy_idx
-			= prAteOps->u4PhyIdx;
-#if (CFG_MTK_ANDROID_EMI == 1)
-		prServiceTest->test_winfo->icap_emi_start_addr
-			= prAteOps->u4EmiStartAddress;
-		prServiceTest->test_winfo->icap_emi_end_addr
-			= prAteOps->u4EmiEndAddress;
-		prServiceTest->test_winfo->icap_emi_msb_addr
-			= prAteOps->u4EmiMsbAddress;
-#else
-		prServiceTest->test_winfo->icap_emi_start_addr = 0;
-		prServiceTest->test_winfo->icap_emi_end_addr = 0;
-		prServiceTest->test_winfo->icap_emi_msb_addr = 0;
-#endif /* (CFG_MTK_ANDROID_EMI == 1) */
-	} else {
-		DBGLOG(INIT, WARN, "prAteOps is null!\n");
 	}
 
 	prServiceTest->engine_offload = true;
@@ -4307,19 +4377,17 @@ uint32_t wlanServiceInit(struct GLUE_INFO *prGlueInfo)
 label_exit:
 
 	/* free memory */
-	if (prGlueInfo->rService.serv_handle != NULL) {
-
-		if (prServiceTest->test_winfo != NULL)
-			kalMemFree(prServiceTest->test_winfo, VIR_MEM_TYPE,
-				   sizeof(struct test_wlan_info));
-
-		if (prServiceTest->test_op != NULL)
-			kalMemFree(prServiceTest->test_op, VIR_MEM_TYPE,
-				   sizeof(struct test_operation));
-
+	if (prGlueInfo->rService.serv_handle != NULL)
 		kalMemFree(prGlueInfo->rService.serv_handle, VIR_MEM_TYPE,
 			sizeof(struct service_test));
-	}
+
+	if (prServiceTest->test_winfo != NULL)
+		kalMemFree(prServiceTest->test_winfo, VIR_MEM_TYPE,
+			   sizeof(struct test_wlan_info));
+
+	if (prServiceTest->test_op != NULL)
+		kalMemFree(prServiceTest->test_op, VIR_MEM_TYPE,
+			   sizeof(struct test_operation));
 
 	return WLAN_STATUS_FAILURE;
 }
@@ -4340,18 +4408,17 @@ uint32_t wlanServiceExit(struct GLUE_INFO *prGlueInfo)
 	if (rStatus != WLAN_STATUS_SUCCESS)
 		DBGLOG(INIT, WARN, "wlanServiceExit fail err:%d\n", rStatus);
 
-	if (prGlueInfo->rService.serv_handle) {
-		if (prServiceTest->test_winfo)
-			kalMemFree(prServiceTest->test_winfo,
-			VIR_MEM_TYPE, sizeof(struct test_wlan_info));
+	if (prServiceTest->test_winfo)
+		kalMemFree(prServiceTest->test_winfo,
+		VIR_MEM_TYPE, sizeof(struct test_wlan_info));
 
-		if (prServiceTest->test_op)
-			kalMemFree(prServiceTest->test_op,
-			VIR_MEM_TYPE, sizeof(struct test_operation));
+	if (prServiceTest->test_op)
+		kalMemFree(prServiceTest->test_op,
+		VIR_MEM_TYPE, sizeof(struct test_operation));
 
+	if (prGlueInfo->rService.serv_handle)
 		kalMemFree(prGlueInfo->rService.serv_handle,
 		VIR_MEM_TYPE, sizeof(struct service_test));
-	}
 
 	prGlueInfo->rService.serv_id = 0;
 
@@ -4361,31 +4428,14 @@ uint32_t wlanServiceExit(struct GLUE_INFO *prGlueInfo)
 
 #ifdef CONFIG_MTK_CONNSYS_DEDICATED_LOG_PATH
 
-#if (CFG_SUPPORT_ICS == 1)
-#define ICS_LOG_CMD_ON_OFF        0
-#define ICS_LOG_CMD_SET_LEVEL     1
+#define FW_LOG_CMD_ON_OFF        0
+#define FW_LOG_CMD_SET_LEVEL     1
+static uint32_t u4LogOnOffCache = -1;
 
-enum ENUM_ICS_LOG_LEVEL_T {
-	ENUM_ICS_LOG_LEVEL_DISABLE,
-	ENUM_ICS_LOG_LEVEL_MAC,
+struct CMD_CONNSYS_FW_LOG {
+	int32_t fgCmd;
+	int32_t fgValue;
 };
-
-static uint32_t u4IcsLogOnOffCache;
-static uint32_t u4IcsLogLevelCache = ENUM_ICS_LOG_LEVEL_DISABLE;
-#endif /* CFG_SUPPORT_ICS */
-
-static uint32_t u4LogOnOffCache;
-static uint32_t u4LogLevelCache = -1;
-
-uint32_t getFWLogOnOff(void)
-{
-	return u4LogOnOffCache;
-}
-
-uint32_t getFWLogLevel(void)
-{
-	return u4LogLevelCache;
-}
 
 uint32_t
 connsysFwLogControl(struct ADAPTER *prAdapter, void *pvSetBuffer,
@@ -4441,17 +4491,8 @@ connsysFwLogControl(struct ADAPTER *prAdapter, void *pvSetBuffer,
 
 		rCmdV1Header.cmdBufferLen += sizeof(struct CMD_FORMAT_V1);
 		rCmdV1Header.itemNum = 1;
-		prAdapter->fgSetLogOnOff = false;
 
-		if (prCmd->fgEarlySet) {
-			rStatus = wlanSendFwLogControlCmd(prAdapter,
-					CMD_ID_GET_SET_CUSTOMER_CFG,
-					NULL,
-					NULL,
-					sizeof(struct CMD_HEADER),
-					(uint8_t *)&rCmdV1Header);
-		} else {
-			rStatus = wlanSendSetQueryCmd(
+		rStatus = wlanSendSetQueryCmd(
 				prAdapter, /* prAdapter */
 				CMD_ID_GET_SET_CUSTOMER_CFG, /* 0x70 */
 				TRUE,  /* fgSetQuery */
@@ -4464,141 +4505,19 @@ connsysFwLogControl(struct ADAPTER *prAdapter, void *pvSetBuffer,
 				NULL,  /* pvSetQueryBuffer */
 				0      /* u4SetQueryBufferLen */
 			);
-		}
 
 		/* keep in cache */
 		u4LogOnOffCache = prCmd->fgValue;
-
-		if (rStatus != WLAN_STATUS_FAILURE)
-			prAdapter->fgSetLogOnOff = true;
-		else
-			DBGLOG(INIT, INFO, "Log On/Off setting fail!\n");
 	} else if (prCmd->fgCmd == FW_LOG_CMD_SET_LEVEL) {
 		/*ENG_LOAD_OFFSET 1*/
 		/*USERDEBUG_LOAD_OFFSET 2 */
 		/*USER_LOAD_OFFSET 3 */
-		int32_t u4LogLevel = ENUM_WIFI_LOG_LEVEL_DEFAULT;
-
-		DBGLOG(INIT, INFO, "FW_LOG_CMD_SET_LEVEL %d\n", prCmd->fgValue);
-		switch (prCmd->fgValue) {
-		case 0:
-			u4LogLevel = ENUM_WIFI_LOG_LEVEL_DEFAULT;
-			break;
-		case 1:
-			u4LogLevel = ENUM_WIFI_LOG_LEVEL_MORE;
-			break;
-		case 2:
-			u4LogLevel = ENUM_WIFI_LOG_LEVEL_EXTREME;
-			break;
-		default:
-			u4LogLevel = ENUM_WIFI_LOG_LEVEL_DEFAULT;
-			break;
-		}
-		wlanDbgSetLogLevelImpl(prAdapter,
-					   ENUM_WIFI_LOG_LEVEL_VERSION_V1,
-					   ENUM_WIFI_LOG_MODULE_DRIVER,
-					   u4LogLevel);
-
-		if (prCmd->fgEarlySet) {
-			wlanDbgSetLogLevel(prAdapter,
-					   ENUM_WIFI_LOG_LEVEL_VERSION_V1,
-					   ENUM_WIFI_LOG_MODULE_FW,
-					   u4LogLevel, TRUE);
-		} else {
-			wlanDbgSetLogLevelImpl(prAdapter,
-					   ENUM_WIFI_LOG_LEVEL_VERSION_V1,
-					   ENUM_WIFI_LOG_MODULE_FW,
-					   u4LogLevel);
-		}
-
-		/* keep in cache */
-		u4LogLevelCache = prCmd->fgValue;
+		DBGLOG(INIT, INFO, "FW_LOG_CMD_SET_LEVEL\n");
 	} else {
 		DBGLOG(INIT, INFO, "command can not parse\n");
 	}
 	return WLAN_STATUS_SUCCESS;
 }
-
-#if (CFG_SUPPORT_ICS == 1)
-static void ics_log_event_notification(int cmd, int value)
-{
-	struct net_device *prDev = gPrDev;
-	struct GLUE_INFO *prGlueInfo = NULL;
-	struct ADAPTER *prAdapter = NULL;
-	struct PARAM_CUSTOM_ICS_SNIFFER_INFO_STRUCT rSniffer;
-	uint32_t u4BufLen = 0;
-	uint32_t rStatus = WLAN_STATUS_FAILURE;
-
-	DBGLOG(INIT, INFO, "gPrDev=%p, cmd=%d, value=%d\n",
-		gPrDev, cmd, value);
-
-	/*
-	 * Special code that matches App behavior:
-	 * 1. set ics log level
-	 * 2. set on/off (if fwlog on, then icslog also get on)
-	 */
-	if (cmd == ICS_LOG_CMD_ON_OFF) {
-		u4IcsLogOnOffCache = value;
-		if (u4IcsLogOnOffCache == 1 &&
-			u4IcsLogLevelCache == ENUM_ICS_LOG_LEVEL_DISABLE) {
-			DBGLOG(INIT, WARN, "IcsLv is disable!!!\n");
-			u4IcsLogOnOffCache = 0;
-		}
-	} else if (cmd == ICS_LOG_CMD_SET_LEVEL) {
-		u4IcsLogLevelCache = value;
-		if (u4IcsLogLevelCache == ENUM_ICS_LOG_LEVEL_DISABLE) {
-			DBGLOG(INIT, INFO, "IcsLv set to disable.\n");
-			u4IcsLogOnOffCache = 0;
-		} else {
-			DBGLOG(INIT, INFO, "IcsLv set to MAC ICS.\n");
-			u4IcsLogOnOffCache = 1;
-		}
-	}
-
-	if (kalIsHalted() || !prDev) {
-		DBGLOG(INIT, INFO, "device not ready return");
-		return;
-	}
-
-	prGlueInfo = *((struct GLUE_INFO **) netdev_priv(prDev));
-	if (!prGlueInfo) {
-		DBGLOG(INIT, INFO, "prGlueInfo is NULL return");
-		return;
-	}
-
-	prAdapter = prGlueInfo->prAdapter;
-	if (!prAdapter) {
-		DBGLOG(INIT, INFO, "prAdapter is NULL return");
-		return;
-	}
-
-	if (cmd == ICS_LOG_CMD_ON_OFF || cmd == ICS_LOG_CMD_SET_LEVEL) {
-		kalMemZero(&rSniffer, sizeof(
-			struct PARAM_CUSTOM_ICS_SNIFFER_INFO_STRUCT));
-		rSniffer.ucModule = 2;
-		rSniffer.ucAction = u4IcsLogOnOffCache;
-		rSniffer.ucFilter = 0;
-		rSniffer.ucOperation = 0;
-		rSniffer.ucCondition[0] = 2;
-		rSniffer.ucCondition[1] = 0;
-		rSniffer.ucCondition[2] = 0;
-		rSniffer.ucCondition[3] = 0;
-		rSniffer.ucCondition[4] = 0;
-		rSniffer.ucCondition[5] = 0;
-
-		rStatus = kalIoctl(prGlueInfo,
-			wlanoidSetIcsSniffer,
-			&rSniffer, sizeof(rSniffer),
-			FALSE, FALSE, TRUE, &u4BufLen);
-		if (rStatus != WLAN_STATUS_SUCCESS)
-			DBGLOG(INIT, INFO, "wlanoidSetIcsSniffer failed");
-		DBGLOG(INIT, INFO, "IcsLog[Lv:OnOff]=[%d:%d]\n",
-			u4IcsLogLevelCache, u4IcsLogOnOffCache);
-	} else {
-		DBGLOG(INIT, INFO, "unknown cmd %d\n", cmd);
-	}
-}
-#endif /* CFG_SUPPORT_ICS */
 
 static void consys_log_event_notification(int cmd, int value)
 {
@@ -4612,22 +4531,8 @@ static void consys_log_event_notification(int cmd, int value)
 	DBGLOG(INIT, INFO, "gPrDev=%p, cmd=%d, value=%d\n",
 		gPrDev, cmd, value);
 
-	if (cmd == FW_LOG_CMD_ON_OFF) {
-		u4LogOnOffCache = value;
-
-#ifdef CONFIG_MTK_CONNSYS_DEDICATED_LOG_PATH
-#if (CFG_SUPPORT_CONNINFRA == 1)
-		if (u4LogOnOffCache == 0) {
-			fw_log_wifi_irq_handler();
-			DBGLOG(INIT, TRACE, "Stopping logs...\n");
-		}
-#endif
-#endif
-	}
-	if (cmd == FW_LOG_CMD_SET_LEVEL)
-		u4LogLevelCache = value;
-
 	if (kalIsHalted()) { /* power-off */
+		u4LogOnOffCache = value;
 		DBGLOG(INIT, INFO,
 			"Power off return, u4LogOnOffCache=%d\n",
 				u4LogOnOffCache);
@@ -4638,6 +4543,7 @@ static void consys_log_event_notification(int cmd, int value)
 		*((struct GLUE_INFO **) netdev_priv(prDev)) : NULL;
 	DBGLOG(INIT, TRACE, "prGlueInfo=%p\n", prGlueInfo);
 	if (!prGlueInfo) {
+		u4LogOnOffCache = value;
 		DBGLOG(INIT, INFO,
 			"prGlueInfo == NULL return, u4LogOnOffCache=%d\n",
 				u4LogOnOffCache);
@@ -4646,6 +4552,7 @@ static void consys_log_event_notification(int cmd, int value)
 	prAdapter = prGlueInfo->prAdapter;
 	DBGLOG(INIT, TRACE, "prAdapter=%p\n", prAdapter);
 	if (!prAdapter) {
+		u4LogOnOffCache = value;
 		DBGLOG(INIT, INFO,
 			"prAdapter == NULL return, u4LogOnOffCache=%d\n",
 				u4LogOnOffCache);
@@ -4655,83 +4562,60 @@ static void consys_log_event_notification(int cmd, int value)
 	kalMemZero(&rFwLogCmd, sizeof(rFwLogCmd));
 	rFwLogCmd.fgCmd = cmd;
 	rFwLogCmd.fgValue = value;
-	rFwLogCmd.fgEarlySet = FALSE;
 
 	rStatus = kalIoctl(prGlueInfo,
 				   connsysFwLogControl,
 				   &rFwLogCmd,
 				   sizeof(struct CMD_CONNSYS_FW_LOG),
-				   FALSE, FALSE, FALSE,
+				   FALSE, FALSE, TRUE,
 				   &u4BufLen);
 }
 #endif
 
-#if (CFG_SUPPORT_POWER_THROTTLING == 1)
-int connsys_power_event_notification(
-		enum conn_pwr_event_type type, void *data)
+/* fos_change begin */
+#if IS_ENABLED(CONFIG_IDME)
+static void idme_get_mac_addr(OUT struct REG_INFO *prRegInfo)
 {
-	struct GLUE_INFO *prGlueInfo = NULL;
-	struct ADAPTER *prAdapter = NULL;
-	struct net_device *prDev = gPrDev;
-	uint32_t *prLevel;
-	struct conn_pwr_event_max_temp *prTempInfo;
-	int ret = -1;
+	struct device_node *ap;
+	int32_t len = 0;
+	int32_t i, ret;
+	char buf[3] = {0};
 
-	prGlueInfo = (prDev != NULL) ?
-		*((struct GLUE_INFO **) netdev_priv(prDev)) : NULL;
-	DBGLOG(INIT, TRACE, "prGlueInfo=%p\n", prGlueInfo);
-	if (!prGlueInfo) {
-		DBGLOG(INIT, INFO,
-			"prGlueInfo == NULL return\n");
-		return ret;
+	ap = of_find_node_by_path(IDME_OF_MAC_ADDR);
+	if (likely(ap)) {
+		const char *mac_addr = of_get_property(ap, "value", &len);
+
+		if (likely(len >= 12)) {
+			for (i = 0; i < 12; i += 2) {
+				buf[0] = mac_addr[i];
+				buf[1] = mac_addr[i + 1];
+				ret = kstrtou8(buf, 16,
+					&prRegInfo->aucMacAddr[i >> 1]);
+				if (ret)
+					DBGLOG(INIT, WARN,
+					"kstrtou8 failed, i=%d\n", i);
+			}
+		}
 	}
-
-	prAdapter = prGlueInfo->prAdapter;
-	DBGLOG(INIT, TRACE, "prAdapter=%p\n", prAdapter);
-	if (!prAdapter) {
-		DBGLOG(INIT, INFO,
-			"prAdapter == NULL return\n");
-		return ret;
-	}
-
-	switch (type) {
-	case CONN_PWR_EVENT_LEVEL:
-		prLevel = (int *)data;
-		prAdapter->u4PwrLevel = *prLevel;
-
-		DBGLOG(INIT, INFO, "New power level: %d\n",
-					prAdapter->u4PwrLevel);
-
-		set_bit(GLUE_FLAG_CNS_PWR_LEVEL_BIT, &prGlueInfo->ulFlag);
-		/* wake up main thread */
-		wake_up_interruptible(&prGlueInfo->waitq);
-
-		break;
-
-	case CONN_PWR_EVENT_MAX_TEMP:
-		prTempInfo = (struct conn_pwr_event_max_temp *)data;
-		(prAdapter->rTempInfo).max_temp = prTempInfo->max_temp;
-		(prAdapter->rTempInfo).recovery_temp =
-						prTempInfo->recovery_temp;
-
-		DBGLOG(INIT, INFO, "New max temp: %d/New recovery temp: %d",
-					(prAdapter->rTempInfo).max_temp,
-					(prAdapter->rTempInfo).recovery_temp);
-
-		set_bit(GLUE_FLAG_CNS_PWR_TEMP_BIT, &prGlueInfo->ulFlag);
-		/* wake up main thread */
-		wake_up_interruptible(&prGlueInfo->waitq);
-
-		break;
-
-	default:
-		DBGLOG(INIT, TRACE, "Unknown connsys power event type.\n");
-		return ret;
-	}
-
-	return 0;
 }
-#endif
+
+static void idme_get_board_id(void)
+{
+	struct device_node *ap;
+	uint32_t len;
+
+	ap = of_find_node_by_path(IDME_OF_BOARD_ID);
+	if (likely(ap)) {
+		const char *board_id = of_get_property(ap, "value", &len);
+
+		if (board_id != NULL && likely(len >= 16)) {
+			memcpy(idme_board_id, board_id,
+				sizeof(idme_board_id) - 1);
+			idme_board_id[sizeof(idme_board_id) - 1] = '\0';
+		}
+	}
+}
+#endif /* fos_change end */
 
 static
 void wlanOnPreAdapterStart(struct GLUE_INFO *prGlueInfo,
@@ -4740,15 +4624,10 @@ void wlanOnPreAdapterStart(struct GLUE_INFO *prGlueInfo,
 	struct mt66xx_chip_info **pprChipInfo)
 {
 	uint32_t u4Idx = 0;
-#if CFG_WMT_WIFI_PATH_SUPPORT
-	int32_t i4RetVal = 0;
-#endif
 
 	DBGLOG(INIT, TRACE, "start.\n");
 	prGlueInfo->u4ReadyFlag = 0;
-#if CFG_MTK_ANDROID_WMT
-	update_driver_loaded_status(prGlueInfo->u4ReadyFlag);
-#endif
+
 #if CFG_TCP_IP_CHKSUM_OFFLOAD
 	prAdapter->fgIsSupportCsumOffload = FALSE;
 	prAdapter->u4CSUMFlags = CSUM_OFFLOAD_EN_ALL;
@@ -4757,6 +4636,8 @@ void wlanOnPreAdapterStart(struct GLUE_INFO *prGlueInfo,
 #if CFG_SUPPORT_CFG_FILE
 	wlanGetConfig(prAdapter);
 #endif
+
+	prAdapter->CurNoResSeqID = 0;
 
 	/* Init Chip Capability */
 	*pprChipInfo = prAdapter->chip_info;
@@ -4774,7 +4655,7 @@ void wlanOnPreAdapterStart(struct GLUE_INFO *prGlueInfo,
 			(WLAN_FLAG_6G_WF0 | WLAN_FLAG_6G_WF1);
 #endif
 
-#if CFG_WMT_WIFI_PATH_SUPPORT
+#if (MTK_WCN_HIF_SDIO && CFG_WMT_WIFI_PATH_SUPPORT)
 	i4RetVal = mtk_wcn_wmt_wifi_fem_cfg_report((
 				void *)&prAdapter->rWifiFemCfg);
 	if (i4RetVal)
@@ -4795,14 +4676,18 @@ void wlanOnPreAdapterStart(struct GLUE_INFO *prGlueInfo,
 	/* Trigger the action of switching Pwr state to drv_own */
 	prAdapter->fgIsFwOwn = TRUE;
 
-	nicpmWakeUpWiFi(prAdapter);
-
 	/* Load NVRAM content to REG_INFO_T */
 	glLoadNvram(prGlueInfo, *pprRegInfo);
 
 	/* kalMemCopy(&prGlueInfo->rRegInfo, prRegInfo,
 	 *            sizeof(REG_INFO_T));
 	 */
+
+	/* fos_change begin */
+#if IS_ENABLED(CONFIG_IDME)
+	idme_get_mac_addr(&prGlueInfo->rRegInfo);
+	idme_get_board_id();
+#endif /* fos_change end */
 
 	(*pprRegInfo)->u4PowerMode = CFG_INIT_POWER_SAVE_PROF;
 #if 0
@@ -4829,11 +4714,7 @@ void wlanOnPreAdapterStart(struct GLUE_INFO *prGlueInfo,
 		prWpaInfo->u4CipherPairwise = IW_AUTH_CIPHER_NONE;
 	}
 
-	tasklet_init(&prGlueInfo->rRxTask, halRxTasklet,
-			(unsigned long)prGlueInfo);
-	tasklet_init(&prGlueInfo->rTxCompleteTask,
-			halTxCompleteTasklet,
-			(unsigned long)prGlueInfo);
+	glTaskletInit(prGlueInfo);
 
 #if CFG_SUPPORT_NAN
 	prAdapter->fgIsNANfromHAL = TRUE;
@@ -4853,9 +4734,11 @@ void wlanOnPostAdapterStart(struct ADAPTER *prAdapter,
 		if (!prAdapter->fgTxDirectInited) {
 			skb_queue_head_init(
 					&prAdapter->rTxDirectSkbQueue);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0))
+
+#if KERNEL_VERSION(4, 15, 0) <= LINUX_VERSION_CODE
 			timer_setup(&prAdapter->rTxDirectSkbTimer,
 					nicTxDirectTimerCheckSkbQ, 0);
+
 			timer_setup(&prAdapter->rTxDirectHifTimer,
 					nicTxDirectTimerCheckHifQ, 0);
 #else
@@ -4875,9 +4758,9 @@ void wlanOnPostAdapterStart(struct ADAPTER *prAdapter,
 		}
 	}
 
-#if CFG_SUPPORT_RX_GRO
-	kalGROTimerInit(prAdapter);
-#endif /* CFG_SUPPORT_RX_GRO */
+#if (CFG_SUPPORT_TX_TSO_SW == 1)
+	skb_queue_head_init(&prAdapter->rTsoQueue);
+#endif
 }
 
 static int32_t wlanOnPreNetRegister(struct GLUE_INFO *prGlueInfo,
@@ -4887,6 +4770,9 @@ static int32_t wlanOnPreNetRegister(struct GLUE_INFO *prGlueInfo,
 	const u_int8_t bAtResetFlow)
 {
 	uint32_t i;
+#if (CFG_SUPPORT_WFDMA_REALLOC == 1)
+	uint32_t u4Status;
+#endif /* CFG_SUPPORT_WFDMA_REALLOC */
 
 	DBGLOG(INIT, TRACE, "start.\n");
 
@@ -4899,60 +4785,41 @@ static int32_t wlanOnPreNetRegister(struct GLUE_INFO *prGlueInfo,
 		INIT_DELAYED_WORK(&prGlueInfo->rRxPktDeAggWork,
 				halDeAggRxPktWorker);
 	}
-	INIT_WORK(&prGlueInfo->rTxMsduFreeWork, kalFreeTxMsduWorker);
-
 	prGlueInfo->main_thread = kthread_run(main_thread,
-			prGlueInfo->prDevHandler, "main_thread");
+		prGlueInfo->prDevHandler, "main_thread");
 #if CFG_SUPPORT_MULTITHREAD
+	INIT_WORK(&prGlueInfo->rTxMsduFreeWork, kalFreeTxMsduWorker);
 	prGlueInfo->hif_thread = kthread_run(hif_thread,
 			prGlueInfo->prDevHandler, "hif_thread");
 	prGlueInfo->rx_thread = kthread_run(rx_thread,
 			prGlueInfo->prDevHandler, "rx_thread");
 #endif
-	/* TODO the change schedule API shall be provided by OS glue
-	 * layer
-	 */
-	/* Switch the Wi-Fi task priority to higher priority and change
-	 * the scheduling method
-	 */
-	if (prGlueInfo->prAdapter->rWifiVar.ucThreadPriority > 0) {
-#if KERNEL_VERSION(4, 19, 0) >= LINUX_VERSION_CODE
-		struct sched_param param = {
-			.sched_priority = prGlueInfo->prAdapter
-			->rWifiVar.ucThreadPriority
-		};
-		sched_setscheduler(prGlueInfo->main_thread,
-				   prGlueInfo->prAdapter->rWifiVar
-				   .ucThreadScheduling, &param);
-#if CFG_SUPPORT_MULTITHREAD
-		sched_setscheduler(prGlueInfo->hif_thread,
-					prGlueInfo->prAdapter->rWifiVar
-					.ucThreadScheduling, &param);
-		sched_setscheduler(prGlueInfo->rx_thread,
-					prGlueInfo->prAdapter->rWifiVar
-					.ucThreadScheduling, &param);
-#endif
-#endif
-		DBGLOG(INIT, INFO,
-		       "Set pri = %d, sched = %d\n",
-		       prGlueInfo->prAdapter->rWifiVar.ucThreadPriority,
-		       prGlueInfo->prAdapter->rWifiVar
-		       .ucThreadScheduling);
-	}
 
-	if (!bAtResetFlow) {
+	if (!bAtResetFlow)
 		g_u4HaltFlag = 0;
 
-#if CFG_SUPPORT_BUFFER_MODE
-#if (CFG_EFUSE_BUFFER_MODE_DELAY_CAL == 1)
+#if (CFG_SUPPORT_WFDMA_REALLOC == 1)
+	u4Status = wlanWfdmaRealloc(prAdapter);
+
+	if (u4Status != WLAN_STATUS_NOT_SUPPORTED &&
+	    u4Status != WLAN_STATUS_SUCCESS)
+		return -1;
+#endif /* CFG_SUPPORT_WFDMA_REALLOC */
+
+#if CFG_SUPPORT_BUFFER_MODE && (CFG_EFUSE_BUFFER_MODE_DELAY_CAL == 1)
+
+#if CFG_MTK_ANDROID_WMT
+	if (!bAtResetFlow) {
+#else
+	{
+#endif /* CFG_MTK_ANDROID_WMT */
 		if (prChipInfo->downloadBufferBin) {
 			if (prChipInfo->downloadBufferBin(prAdapter) !=
 					WLAN_STATUS_SUCCESS)
 				return -1;
 		}
-#endif
-#endif
 	}
+#endif /* CFG_SUPPORT_BUFFER_MODE && CFG_EFUSE_BUFFER_MODE_DELAY_CAL */
 
 #if CFG_SUPPORT_NAN
 	if (!bAtResetFlow)
@@ -4960,8 +4827,9 @@ static int32_t wlanOnPreNetRegister(struct GLUE_INFO *prGlueInfo,
 #endif
 
 #if CFG_SUPPORT_DBDC
-	/* Update DBDC default setting */
-	cnmInitDbdcSetting(prAdapter);
+	if (!bAtResetFlow)
+		/* Update DBDC default setting */
+		cnmInitDbdcSetting(prAdapter);
 #endif /*CFG_SUPPORT_DBDC*/
 
 	/* send regulatory information to firmware */
@@ -4970,20 +4838,20 @@ static int32_t wlanOnPreNetRegister(struct GLUE_INFO *prGlueInfo,
 	/* set MAC address */
 	if (!bAtResetFlow) {
 		uint32_t rStatus = WLAN_STATUS_FAILURE;
-		struct sockaddr MacAddr = {0};
+		struct sockaddr MacAddr;
 		uint32_t u4SetInfoLen = 0;
 		struct net_device *prDevHandler;
 
 		rStatus = kalIoctl(prGlueInfo, wlanoidQueryCurrentAddr,
 				&MacAddr.sa_data, PARAM_MAC_ADDR_LEN,
-				TRUE, TRUE, TRUE, &u4SetInfoLen);
+				TRUE, TRUE, FALSE, &u4SetInfoLen);
 
 		if (rStatus != WLAN_STATUS_SUCCESS) {
 			DBGLOG(INIT, WARN, "set MAC addr fail 0x%x\n",
 							rStatus);
 		} else {
-			kalMemCopy(prGlueInfo->prDevHandler->dev_addr,
-					&MacAddr.sa_data, ETH_ALEN);
+			kal_eth_hw_addr_set(prGlueInfo->prDevHandler,
+					    MacAddr.sa_data);
 			kalMemCopy(prGlueInfo->prDevHandler->perm_addr,
 					prGlueInfo->prDevHandler->dev_addr,
 					ETH_ALEN);
@@ -4997,26 +4865,23 @@ static int32_t wlanOnPreNetRegister(struct GLUE_INFO *prGlueInfo,
 		/* wlan1 */
 		if (KAL_AIS_NUM > 1) {
 			prDevHandler = wlanGetNetDev(prGlueInfo, 1);
-			if (prDevHandler) {
-				kalMemCopy(prDevHandler->dev_addr,
-					&prAdapter->rWifiVar.aucMacAddress1,
-					ETH_ALEN);
-				kalMemCopy(prDevHandler->perm_addr,
-					prDevHandler->dev_addr,
-					ETH_ALEN);
+			kal_eth_hw_addr_set(prDevHandler,
+					    prWifiVar->aucMacAddress1);
+			kalMemCopy(prDevHandler->perm_addr,
+				prDevHandler->dev_addr,
+				ETH_ALEN);
 #if CFG_SHOW_MACADDR_SOURCE
-				DBGLOG(INIT, INFO,
-					"MAC1 address: " MACSTR,
-					MAC2STR(prDevHandler->dev_addr));
+			DBGLOG(INIT, INFO,
+				"MAC1 address: " MACSTR,
+				MAC2STR(prDevHandler->dev_addr));
 #endif
-			}
 		}
 	}
 
 #if CFG_TCP_IP_CHKSUM_OFFLOAD
 	/* set HW checksum offload */
 	if (!bAtResetFlow && prAdapter->fgIsSupportCsumOffload) {
-		uint32_t rStatus = WLAN_STATUS_FAILURE;
+		uint32_t rStatus;
 		uint32_t u4CSUMFlags = CSUM_OFFLOAD_EN_ALL;
 		uint32_t u4SetInfoLen = 0;
 
@@ -5039,12 +4904,23 @@ static int32_t wlanOnPreNetRegister(struct GLUE_INFO *prGlueInfo,
 		}
 	}
 #endif
+
+#if (CFG_SUPPORT_TX_TSO_SW == 1)
+	for (i = 0; i < KAL_AIS_NUM; i++) {
+		gprWdev[i]->netdev->features |=
+			NETIF_F_TSO |
+			NETIF_F_TSO6 |
+			NETIF_F_GSO |
+			NETIF_F_SG;
+	}
+#endif
+
 #if CFG_SUPPORT_802_11K
 	{
 		uint32_t u4Idx = 0;
 
 		for (u4Idx = 0; u4Idx < KAL_AIS_NUM; u4Idx++) {
-			uint32_t rStatus = WLAN_STATUS_FAILURE;
+			uint32_t rStatus;
 			uint32_t u4SetInfoLen = 0;
 
 			rStatus = kalIoctlByBssIdx(prGlueInfo,
@@ -5112,21 +4988,16 @@ int32_t wlanOnWhenProbeSuccess(struct GLUE_INFO *prGlueInfo,
 	struct ADAPTER *prAdapter,
 	const u_int8_t bAtResetFlow)
 {
-#if CFG_SUPPORT_PERSIST_NETDEV
-	uint8_t i;
-#endif
+	int32_t u4LogLevel = ENUM_WIFI_LOG_LEVEL_DEFAULT;
 
 	DBGLOG(INIT, TRACE, "start.\n");
-
+#if CFG_SUPPORT_CFG_FILE
 #if CFG_SUPPORT_EASY_DEBUG
 	/* move before reading file
 	 * wlanLoadDefaultCustomerSetting(prAdapter);
 	 */
-	wlanFeatureToFw(prGlueInfo->prAdapter, WLAN_CFG_DEFAULT);
-
-	/*if driver backup Engineer Mode CFG setting before*/
-	wlanResoreEmCfgSetting(prGlueInfo->prAdapter);
-	wlanFeatureToFw(prGlueInfo->prAdapter, WLAN_CFG_EM);
+	wlanFeatureToFw(prGlueInfo->prAdapter);
+#endif
 #endif
 
 #if CFG_SUPPORT_IOT_AP_BLACKLIST
@@ -5138,19 +5009,18 @@ int32_t wlanOnWhenProbeSuccess(struct GLUE_INFO *prGlueInfo,
 		kalIndicateAgpsNotify(prAdapter, AGPS_EVENT_WLAN_ON, NULL,
 				0);
 #endif
-
+#if CFG_SUPPORT_CFG_FILE
 		wlanCfgSetSwCtrl(prGlueInfo->prAdapter);
 		wlanCfgSetChip(prGlueInfo->prAdapter);
 		wlanCfgSetCountryCode(prGlueInfo->prAdapter);
+#endif
+#if (CFG_SUPPORT_PERMON == 1)
 		kalPerMonInit(prGlueInfo);
+#endif
 #if CFG_MET_TAG_SUPPORT
 		if (met_tag_init() != 0)
 			DBGLOG(INIT, ERROR, "MET_TAG_INIT error!\n");
 #endif
-
-#if CFG_SUPPORT_TPENHANCE_MODE
-		wlanTpeInit(prGlueInfo);
-#endif /* CFG_SUPPORT_TPENHANCE_MODE */
 	}
 
 #if CFG_SUPPORT_CAL_RESULT_BACKUP_TO_HOST
@@ -5177,16 +5047,24 @@ int32_t wlanOnWhenProbeSuccess(struct GLUE_INFO *prGlueInfo,
 	/* card is ready */
 	prGlueInfo->u4ReadyFlag = 1;
 #if CFG_MTK_ANDROID_WMT
-		update_driver_loaded_status(prGlueInfo->u4ReadyFlag);
+	update_driver_loaded_status(prGlueInfo->u4ReadyFlag);
 #endif
+
 	kalSetHalted(FALSE);
 
+	wlanDbgGetGlobalLogLevel(ENUM_WIFI_LOG_MODULE_FW,
+				 &u4LogLevel);
+	if (u4LogLevel > ENUM_WIFI_LOG_LEVEL_DEFAULT)
+		wlanDbgSetLogLevelImpl(prAdapter,
+				       ENUM_WIFI_LOG_LEVEL_VERSION_V1,
+				       ENUM_WIFI_LOG_MODULE_FW,
+				       u4LogLevel);
 
 #ifdef CONFIG_MTK_CONNSYS_DEDICATED_LOG_PATH
-#if (CFG_SUPPORT_ICS == 1)
-	ics_log_event_notification((int)ICS_LOG_CMD_ON_OFF,
-		u4IcsLogOnOffCache);
-#endif
+	/* sync log status with firmware */
+	if (u4LogOnOffCache != -1) /* -1: connsysD does not set */
+		consys_log_event_notification((int)FW_LOG_CMD_ON_OFF,
+			u4LogOnOffCache);
 #endif
 
 #if CFG_CHIP_RESET_HANG
@@ -5198,118 +5076,551 @@ int32_t wlanOnWhenProbeSuccess(struct GLUE_INFO *prGlueInfo,
 	DBGLOG(INIT, STATE, "[SER][L0] PASS!!\n");
 #endif
 
-#if CFG_SUPPORT_LOWLATENCY_MODE
-	wlanProbeSuccessForLowLatency(prAdapter);
-#endif
-
-#if (CFG_SUPPORT_CONNINFRA == 1)
-	if (prAdapter->chip_info->checkbushang) {
-		fw_log_bug_hang_register(prAdapter->chip_info->checkbushang);
-	}
-#endif
-
-#if CFG_SUPPORT_PERSIST_NETDEV
-	for (i = 0; i < KAL_AIS_NUM; i++)
-		netif_device_attach(gprWdev[i]->netdev);
-#endif
-
-	wlanOnP2pRegistration(prGlueInfo, prAdapter, gprWdev[0]);
-	if (prAdapter->u4HostStatusEmiOffset)
-		kalSetSuspendFlagToEMI(prAdapter, FALSE);
-#if CFG_MODIFY_TX_POWER_BY_BAT_VOLT
-	if (wlan_bat_volt == 3550) {
-		kalEnableTxPwrBackoffByBattVolt(prAdapter, TRUE);
-		kalSetTxPwrBackoffByBattVolt(prAdapter, TRUE);
-		fgIsTxPowerDecreased = TRUE;
-	} else if (wlan_bat_volt == 3650) {
-		kalEnableTxPwrBackoffByBattVolt(prAdapter, TRUE);
-		kalSetTxPwrBackoffByBattVolt(prAdapter, FALSE);
-		fgIsTxPowerDecreased = FALSE;
-	}
-#endif
-
 	return 0;
 }
 
-#if CFG_SUPPORT_NAN
-int set_nan_handler(struct net_device *netdev, uint32_t ucEnable)
+#if (CFG_POWER_ON_DOWNLOAD_EMI_ROM_PATCH == 1)
+/* WiFi power on download MCU/WiFi ROM EMI + ROM patch */
+/*----------------------------------------------------------------------------*/
+/*!
+ * \brief Wlan power on init function. This function do the job in the
+ *  power on stage, they are:
+ *  [1]Power on sequence
+ *  [2]Download MCU + WiFi ROM EMI
+ *  [3]Download ROM patch
+ *
+ *  It is to simulate wlanProbe() with the minimum effort to complete
+ *  ROM EMI + ROM patch download.
+ *
+ * \retval 0 Success
+ * \retval negative value Failed
+ */
+/*----------------------------------------------------------------------------*/
+static int32_t wlanPowerOnInit(void)
 {
-	struct GLUE_INFO *prGlueInfo =
-		*((struct GLUE_INFO **)netdev_priv(netdev));
-	uint32_t rWlanStatus = WLAN_STATUS_SUCCESS;
-	uint32_t u4BufLen = 0;
-
-	if (kalIsResetting())
-		return 0;
-
-	if (ucEnable) {
-		struct PARAM_CUSTOM_P2P_SET_STRUCT rSetP2P;
-
-		rSetP2P.u4Mode = 0;
-		rSetP2P.u4Enable = 0;
-		set_p2p_mode_handler(netdev, rSetP2P);
-	}
-
-	if (!ucEnable)
-		nanNetUnregister(prGlueInfo, FALSE);
-
-	rWlanStatus = kalIoctl(prGlueInfo, wlanoidSetNANMode, (void *)&ucEnable,
-			       sizeof(uint32_t), FALSE, FALSE, TRUE, &u4BufLen);
-
-	DBGLOG(INIT, INFO, "set_nan_handler ret = 0x%08lx\n",
-	       (uint32_t)rWlanStatus);
-
-	/* Need to check fgIsNANRegistered, in case of whole chip reset.
-	 * in this case, kalIOCTL return success always,
-	 * and prGlueInfo->prP2PInfo[0] may be NULL
-	 */
-	if ((ucEnable) && (prGlueInfo->prAdapter->fgIsNANRegistered))
-		nanNetRegister(prGlueInfo, FALSE); /* Fixme: error handling */
-
-	if (!ucEnable)
-		wlanOnP2pRegistration(prGlueInfo,
-			prGlueInfo->prAdapter, gprWdev[0]);
-
-	return 0;
-}
+/*
+*	pvData     data passed by bus driver init function
+*		_HIF_EHPI: NULL
+*		_HIF_SDIO: sdio bus driver handle
+*	see hifAxiProbe() for more detail...
+*	pfWlanProbe((void *)prPlatDev,
+*			(void *)prPlatDev->id_entry->driver_data)
+*/
+#if defined(SOC3_0)
+#if defined(_HIF_AXI)
+/* prPlatDev is already created by initWlan()->glRegisterBus()::axi.c */
+	void *pvData = (void *)prPlatDev;
+	void *pvDriverData = (void *)prPlatDev->id_entry->driver_data;
 #endif
 
-void wlanOffWaitWlanThreads(IN struct completion *prComp,
-		IN struct task_struct *prThread)
-{
-	uint32_t waitRet = 0;
+#if defined(_HIF_PCIE)
+	void *pvData = NULL;
+	void *pvDriverData = (void *)&mt66xx_driver_data_soc3_0;
+#endif
+#endif
 
-	while (TRUE) {
-		waitRet = wait_for_completion_interruptible_timeout(
-			prComp, MSEC_TO_JIFFIES(1000));
-		if (waitRet > 0)
-			return;
-		DBGLOG(INIT, WARN,
-			"WlanThread not complete for 1 second.\n");
-		kal_show_stack(NULL, prThread, NULL);
+	int32_t i4Status = 0;
+	enum ENUM_POWER_ON_INIT_FAIL_REASON {
+		BUS_INIT_FAIL,
+		NET_CREATE_FAIL,
+		BUS_SET_IRQ_FAIL,
+		ALLOC_ADAPTER_MEM_FAIL,
+		DRIVER_OWN_FAIL,
+		INIT_ADAPTER_FAIL,
+		INIT_HIFINFO_FAIL,
+		ROM_PATCH_DOWNLOAD_FAIL,
+		POWER_ON_INIT_DONE,
+		FAIL_REASON_NUM
+	} eFailReason;
+	uint32_t i = 0;
+	int32_t i4DevIdx = 0;
+	struct wireless_dev *prWdev = NULL;
+	struct GLUE_INFO *prGlueInfo = NULL;
+	struct ADAPTER *prAdapter = NULL;
+	struct mt66xx_chip_info *prChipInfo;
+	struct FWDL_OPS_T *prFwDlOps;
+
+	DBGLOG(INIT, INFO, "wlanPowerOnInit::begin\n");
+
+	eFailReason = FAIL_REASON_NUM;
+
+	do {
+#if defined(_HIF_AXI)
+		/* AXI goes over here, to be conti... */
+		prChipInfo = ((struct mt66xx_hif_driver_data *)pvDriverData)
+					->chip_info;
+
+		pvData = (void *)prChipInfo->pdev;
+
+		/* we should call axi_enable_device(
+		*        (struct platform_device *)pvData);
+		* since it is invoked from within hifAxiProbe()::axi.c,
+		* before calling pfWlanProbe(), to be conti...
+		*/
+#endif
+
+#if defined(_HIF_PCIE)
+		prChipInfo = ((struct mt66xx_hif_driver_data *)pvDriverData)
+					->chip_info;
+
+		pvData = (void *)prChipInfo->pdev;
+
+		/* no need pci_enable_device(dev),
+		 * it has already been done in PCI driver's probe() function
+		 */
+#endif
+
+		/* [1]Copy from wlanProbe()::Begin */
+		/* Initialize the IO port of the interface */
+		/* GeorgeKuo: pData has different meaning for _HIF_XXX:
+		* _HIF_EHPI: pointer to memory base variable, which will be
+		*      initialized by glBusInit().
+		* _HIF_SDIO: bus driver handle
+		*/
+
+		/* Remember to call glBusRelease() in wlanPowerOnDeinit() */
+		if (glBusInit(pvData) == FALSE) {
+			DBGLOG(INIT, ERROR,
+				"[Wi-Fi PWR On] glBusInit() fail\n");
+
+			i4Status = -EIO;
+
+			eFailReason = BUS_INIT_FAIL;
+
+			break;
+		}
+
+#if (CFG_SUPPORT_TRACE_TC4 == 1)
+		wlanDebugTC4Init();
+#endif
+
+		/* Create network device, Adapter, KalInfo,
+		*       prDevHandler(netdev)
+		*/
+		prWdev = wlanNetCreate(pvData, pvDriverData);
+
+		if (prWdev == NULL) {
+			DBGLOG(INIT, ERROR,
+				"[Wi-Fi PWR On] No memory for dev and its private\n");
+
+			i4Status = -ENOMEM;
+
+			eFailReason = NET_CREATE_FAIL;
+
+			break;
+		}
+
+		/* Set the ioaddr to HIF Info */
+		prGlueInfo = (struct GLUE_INFO *) wiphy_priv(prWdev->wiphy);
+
+		/* Should we need this??? to be conti... */
+		gPrDev = prGlueInfo->prDevHandler;
+
+		/* Setup IRQ */
+		i4Status = glBusSetIrq(prWdev->netdev, NULL, prGlueInfo);
+
+		if (i4Status != WLAN_STATUS_SUCCESS) {
+			DBGLOG(INIT, ERROR, "[Wi-Fi PWR On] Set IRQ error\n");
+
+			eFailReason = BUS_SET_IRQ_FAIL;
+
+			break;
+		}
+
+		prGlueInfo->i4DevIdx = i4DevIdx;
+
+		prAdapter = prGlueInfo->prAdapter;
+		/* [1]Copy from wlanProbe()::End */
+
+		/* [2]Copy from wlanProbe()->wlanOnPreAdapterStart()::Begin */
+		/* Init Chip Capability */
+		prChipInfo = prAdapter->chip_info;
+
+		if (prChipInfo->asicCapInit)
+			prChipInfo->asicCapInit(prAdapter);
+
+		/* Trigger the action of switching Pwr state to drv_own */
+		prAdapter->fgIsFwOwn = TRUE;
+
+		nicpmWakeUpWiFi(prAdapter);
+		/* [2]Copy from wlanProbe()->wlanOnPreAdapterStart()::End */
+
+		/* [3]Copy from
+		* wlanProbe()
+		*	->wlanAdapterStart()
+		*		->wlanOnPreAllocAdapterMem()::Begin
+		*/
+#if 0  /* Sample's gen4m code base doesn't support */
+		prAdapter->u4HifDbgFlag = 0;
+		prAdapter->u4HifChkFlag = 0;
+		prAdapter->u4TxHangFlag = 0;
+		prAdapter->u4NoMoreRfb = 0;
+#endif
+
+		prAdapter->u4OwnFailedCount = 0;
+		prAdapter->u4OwnFailedLogCount = 0;
+
+#if 0  /* Sample's gen4m code base doesn't support */
+		prAdapter->fgEnHifDbgInfo = TRUE;
+#endif
+
+		/* Additional with chip reset optimize*/
+		prAdapter->ucCmdSeqNum = 0;
+		prAdapter->u4PwrCtrlBlockCnt = 0;
+
+		QUEUE_INITIALIZE(&(prAdapter->rPendingCmdQueue));
+#if CFG_SUPPORT_MULTITHREAD
+		QUEUE_INITIALIZE(&prAdapter->rTxCmdQueue);
+		QUEUE_INITIALIZE(&prAdapter->rTxCmdDoneQueue);
+#if CFG_FIX_2_TX_PORT
+		QUEUE_INITIALIZE(&prAdapter->rTxP0Queue);
+		QUEUE_INITIALIZE(&prAdapter->rTxP1Queue);
+#else
+		for (i = 0; i < TX_PORT_NUM; i++)
+			QUEUE_INITIALIZE(&prAdapter->rTxPQueue[i]);
+#endif
+		QUEUE_INITIALIZE(&prAdapter->rRxQueue);
+		QUEUE_INITIALIZE(&prAdapter->rTxDataDoneQueue);
+#endif
+
+		/* reset fgIsBusAccessFailed */
+		fgIsBusAccessFailed = FALSE;
+
+		/* Allocate mandatory resource for TX/RX */
+		if (nicAllocateAdapterMemory(prAdapter)
+			!= WLAN_STATUS_SUCCESS) {
+			DBGLOG(INIT, ERROR,
+				"[Wi-Fi PWR On] nicAllocateAdapterMemory Error!\n");
+
+			i4Status = -ENOMEM;
+
+			eFailReason = ALLOC_ADAPTER_MEM_FAIL;
+/*
+*#if CFG_ENABLE_KEYWORD_EXCEPTION_MECHANISM & 0
+*			mtk_wcn_wmt_assert_keyword(WMTDRV_TYPE_WIFI,
+*			"[Wi-Fi PWR On] nicAllocateAdapterMemory Error!");
+*#endif
+*/
+			break;
+		}
+
+		/* should we need this?  to be conti... */
+		prAdapter->u4OsPacketFilter = PARAM_PACKET_FILTER_SUPPORTED;
+
+		/* WLAN driver acquire LP own */
+		DBGLOG(INIT, TRACE, "[Wi-Fi PWR On] Acquiring LP-OWN\n");
+
+		ACQUIRE_POWER_CONTROL_FROM_PM(prAdapter);
+
+		DBGLOG(INIT, TRACE, "[Wi-Fi PWR On] Acquiring LP-OWN-end\n");
+
+		if (prAdapter->fgIsFwOwn == TRUE) {
+			DBGLOG(INIT, ERROR,
+				"[Wi-Fi PWR On] nicpmSetDriverOwn() failed!\n");
+
+			eFailReason = DRIVER_OWN_FAIL;
+/*
+*#if CFG_ENABLE_KEYWORD_EXCEPTION_MECHANISM & 0
+*			mtk_wcn_wmt_assert_keyword(WMTDRV_TYPE_WIFI,
+*				"[Wi-Fi PWR On] nicpmSetDriverOwn() failed!");
+*#endif
+*/
+			break;
+		}
+
+		/* Initialize the Adapter:
+		*       verify chipset ID, HIF init...
+		*       the code snippet just do the copy thing
+		*/
+		if (nicInitializeAdapter(prAdapter) != WLAN_STATUS_SUCCESS) {
+			DBGLOG(INIT, ERROR,
+				"[Wi-Fi PWR On] nicInitializeAdapter failed!\n");
+
+			eFailReason = INIT_ADAPTER_FAIL;
+
+			break;
+		}
+
+		/* Do the post NIC init adapter:
+		* copy only the mandatory task
+		* in wlanOnPostNicInitAdapter(prAdapter, FALSE)::Begin
+		*/
+		nicInitSystemService(prAdapter, FALSE);
+
+		/* Initialize Tx */
+		nicTxInitialize(prAdapter);
+
+		/* Initialize Rx */
+		nicRxInitialize(prAdapter);
+		/* Do the post NIC init adapter:
+		* copy only the mandatory task
+		* in wlanOnPostNicInitAdapter(prAdapter, FALSE)::End
+		*/
+
+		/* HIF SW info initialize */
+		if (!halHifSwInfoInit(prAdapter)) {
+			DBGLOG(INIT, ERROR,
+				"[Wi-Fi PWR On] halHifSwInfoInit failed!\n");
+
+			eFailReason = INIT_HIFINFO_FAIL;
+
+			break;
+		}
+
+		/* Enable HIF  cut-through to N9 mode */
+		HAL_ENABLE_FWDL(prAdapter, TRUE);
+
+		wlanSetChipEcoInfo(prAdapter);
+
+		/* should we open it, to be conti */
+		/* wlanOnPostInitHifInfo(prAdapter); */
+
+		/* Disable interrupt, download is done by polling mode only */
+		nicDisableInterrupt(prAdapter);
+
+		/* Initialize Tx Resource to fw download state */
+		nicTxInitResetResource(prAdapter);
+
+		/* MCU ROM EMI +
+		* WiFi ROM EMI + ROM patch download goes over here::Begin
+		*/
+		/* assiggned in wlanNetCreate() */
+		prChipInfo = prAdapter->chip_info;
+
+		/* It is configured in mt66xx_chip_info_connac2x2.fw_dl_ops */
+		prFwDlOps = prChipInfo->fw_dl_ops;
+
+		/* No need to check F/W ready bit,
+		* since we are downloading MCU ROM EMI
+		* + WiFi ROM EMI + ROM patch
+		*/
+		/*
+		*DBGLOG(INIT, INFO,
+		*	"wlanDownloadFW:: Check ready_bits(=0x%x)\n",
+		*	prChipInfo->sw_ready_bits);
+		*
+		*HAL_WIFI_FUNC_READY_CHECK(prAdapter,
+		*	prChipInfo->sw_ready_bits, &fgReady);
+		*/
+
+		if (prFwDlOps->downloadPatch) {
+			HAL_ENABLE_FWDL(prAdapter, TRUE);
+
+			DBGLOG_LIMITED(INIT, INFO,
+				"[Wi-Fi PWR On] download Start\n");
+
+			if (prFwDlOps->downloadPatch(prAdapter)
+				!= WLAN_STATUS_SUCCESS) {
+				eFailReason = ROM_PATCH_DOWNLOAD_FAIL;
+
+				HAL_ENABLE_FWDL(prAdapter, FALSE);
+
+				break;
+			}
+
+			DBGLOG_LIMITED(INIT, INFO,
+				"[Wi-Fi PWR On] download End\n");
+
+			HAL_ENABLE_FWDL(prAdapter, FALSE);
+
+			/* This is only to download ROM patch in power on stage,
+			* have to find a better way, to be conti...
+			*/
+			prFwDlOps->downloadPatch = NULL;
+		}
+		/* MCU ROM EMI + WiFi ROM EMI
+		* + ROM patch download goes over here::End
+		*/
+
+		eFailReason = POWER_ON_INIT_DONE;
+		/* [3]Copy from wlanProbe()
+		*		->wlanAdapterStart()
+		*			->wlanOnPreAllocAdapterMem()::End
+		*/
+	} while (FALSE);
+
+	switch (eFailReason) {
+	case BUS_INIT_FAIL:
+		break;
+
+	case NET_CREATE_FAIL:
+#if (CFG_SUPPORT_TRACE_TC4 == 1)
+		wlanDebugTC4Uninit();  /* Uninit for TC4 debug */
+#endif
+
+		/* We should call this, although nothing is inside */
+		glBusRelease(pvData);
+
+		break;
+
+	case BUS_SET_IRQ_FAIL:
+#if (CFG_SUPPORT_TRACE_TC4 == 1)
+		wlanDebugTC4Uninit();  /* Uninit for TC4 debug */
+#endif
+
+		/* We should call this, although nothing is inside */
+		glBusRelease(pvData);
+
+		wlanWakeLockUninit(prGlueInfo);
+
+		wlanNetDestroy(prWdev);
+
+		break;
+
+	case ALLOC_ADAPTER_MEM_FAIL:
+	case DRIVER_OWN_FAIL:
+	case INIT_ADAPTER_FAIL:
+		/* Should we set Onwership to F/W for advanced debug???
+		* to be conti...
+		*/
+		/* nicpmSetFWOwn(prAdapter, FALSE); */
+
+		glBusFreeIrq(prWdev->netdev,
+			*((struct GLUE_INFO **)netdev_priv(prWdev->netdev)));
+
+#if (CFG_SUPPORT_TRACE_TC4 == 1)
+		wlanDebugTC4Uninit();  /* Uninit for TC4 debug */
+#endif
+
+		/* We should call this, although nothing is inside */
+		glBusRelease(pvData);
+
+		wlanWakeLockUninit(prGlueInfo);
+
+		wlanNetDestroy(prWdev);
+
+		break;
+
+	case INIT_HIFINFO_FAIL:
+		nicRxUninitialize(prAdapter);
+
+		nicTxRelease(prAdapter, FALSE);
+
+		/* System Service Uninitialization */
+		nicUninitSystemService(prAdapter);
+
+		/* Should we set Onwership to F/W for advanced debug???
+		* to be conti...
+		*/
+		/* nicpmSetFWOwn(prAdapter, FALSE); */
+
+		glBusFreeIrq(prWdev->netdev,
+			*((struct GLUE_INFO **)netdev_priv(prWdev->netdev)));
+
+#if (CFG_SUPPORT_TRACE_TC4 == 1)
+		wlanDebugTC4Uninit();  /* Uninit for TC4 debug */
+#endif
+
+		/* We should call this, although nothing is inside */
+		glBusRelease(pvData);
+
+		wlanWakeLockUninit(prGlueInfo);
+
+		wlanNetDestroy(prWdev);
+
+		break;
+
+	case ROM_PATCH_DOWNLOAD_FAIL:
+	case POWER_ON_INIT_DONE:
+		HAL_ENABLE_FWDL(prAdapter, FALSE);
+
+		nicRxUninitialize(prAdapter);
+
+		nicTxRelease(prAdapter, FALSE);
+
+		/* System Service Uninitialization */
+		nicUninitSystemService(prAdapter);
+
+		/* Should we set Onwership to F/W for advanced debug???
+		* to be conti...
+		*/
+		/* nicpmSetFWOwn(prAdapter, FALSE); */
+
+		glBusFreeIrq(prWdev->netdev,
+			*((struct GLUE_INFO **)netdev_priv(prWdev->netdev)));
+
+#if (CFG_SUPPORT_TRACE_TC4 == 1)
+		wlanDebugTC4Uninit();  /* Uninit for TC4 debug */
+#endif
+
+		/* We should call this, although nothing is inside */
+		glBusRelease(pvData);
+
+		wlanWakeLockUninit(prGlueInfo);
+
+		wlanNetDestroy(prWdev);
+
+		break;
+
+	default:
+		break;
 	}
+
+	DBGLOG(INIT, INFO, "wlanPowerOnInit::end\n");
+
+	return i4Status;
 }
+
+/*----------------------------------------------------------------------------*/
+/*!
+ * \brief Wlan power on deinit function. This function revert whatever
+ * has been altered in the
+ * power on stage to restore to the most original state.
+ *
+ * \param[in] void
+ *
+ * \return (none)
+ */
+/*----------------------------------------------------------------------------*/
+/*
+*static void wlanPowerOnDeinit(void)
+*{
+*
+*}
+*/
+#endif
+
 
 void wlanOffStopWlanThreads(IN struct GLUE_INFO *prGlueInfo)
 {
 	DBGLOG(INIT, TRACE, "start.\n");
 
+	if (prGlueInfo->main_thread == NULL
+#if CFG_SUPPORT_MULTITHREAD
+		&& prGlueInfo->hif_thread == NULL
+		&& prGlueInfo->rx_thread == NULL
+#endif
+		) {
+
+		DBGLOG(INIT, INFO,
+			"Threads are already NULL, skip stop and free\n");
+		return;
+	}
+
 #if CFG_SUPPORT_MULTITHREAD
 	wake_up_interruptible(&prGlueInfo->waitq_hif);
-	wlanOffWaitWlanThreads(&prGlueInfo->rHifHaltComp,
-			prGlueInfo->hif_thread);
+	wait_for_completion_interruptible(
+		&prGlueInfo->rHifHaltComp);
 	wake_up_interruptible(&prGlueInfo->waitq_rx);
-	wlanOffWaitWlanThreads(&prGlueInfo->rRxHaltComp,
-			prGlueInfo->rx_thread);
+	wait_for_completion_interruptible(&prGlueInfo->rRxHaltComp);
 #endif
 
 	/* wake up main thread */
 	wake_up_interruptible(&prGlueInfo->waitq);
 	/* wait main thread stops */
-	wlanOffWaitWlanThreads(&prGlueInfo->rHaltComp,
-			prGlueInfo->main_thread);
+	wait_for_completion_interruptible(&prGlueInfo->rHaltComp);
 
 	DBGLOG(INIT, INFO, "wlan thread stopped\n");
+
+	/* prGlueInfo->rHifInfo.main_thread = NULL; */
+	prGlueInfo->main_thread = NULL;
+#if CFG_SUPPORT_MULTITHREAD
+	prGlueInfo->hif_thread = NULL;
+	prGlueInfo->rx_thread = NULL;
+
+	prGlueInfo->u4TxThreadPid = 0xffffffff;
+	prGlueInfo->u4HifThreadPid = 0xffffffff;
+#endif
 
 	if (test_and_clear_bit(GLUE_FLAG_OID_BIT, &prGlueInfo->ulFlag) &&
 			!completion_done(&prGlueInfo->rPendComp)) {
@@ -5318,7 +5629,6 @@ void wlanOffStopWlanThreads(IN struct GLUE_INFO *prGlueInfo)
 		DBGLOG(INIT, INFO, "Complete on-going ioctl as failure.\n");
 		prIoReq = &(prGlueInfo->OidEntry);
 		prIoReq->rStatus = WLAN_STATUS_FAILURE;
-		DBGLOG(NIC, TRACE, "rPendComp=%p", &prGlueInfo->rPendComp);
 		complete(&prGlueInfo->rPendComp);
 	}
 }
@@ -5334,18 +5644,14 @@ void wlanOffStopWlanThreads(IN struct GLUE_INFO *prGlueInfo)
  * WLAN_STATUS_SUCCESS - reset off success
  */
 /*----------------------------------------------------------------------------*/
-static int32_t wlanOffAtReset(void)
+int32_t wlanOffAtReset(void)
 {
 	struct ADAPTER *prAdapter = NULL;
 	struct net_device *prDev = NULL;
 	struct GLUE_INFO *prGlueInfo = NULL;
-	struct BUS_INFO *prBusInfo = NULL;
-#if CFG_SUPPORT_PERSIST_NETDEV
-	uint8_t i;
-#endif
 
-	DBGLOG(INIT, INFO, "Driver Off during Reset\n");
-
+	DBGLOG(INIT, STATE, "[SER] Driver Off during Reset\n");
+	kalSetHalted(TRUE);
 	if (u4WlanDevNum > 0
 		&& u4WlanDevNum <= CFG_MAX_WLAN_DEVICES) {
 		prDev = arWlanDevInfo[u4WlanDevNum - 1].prDev;
@@ -5356,14 +5662,16 @@ static int32_t wlanOffAtReset(void)
 		return WLAN_STATUS_FAILURE;
 	}
 
-#if CFG_SUPPORT_PERSIST_NETDEV
-	for (i = 0; i < KAL_AIS_NUM; i++)
-		netif_device_detach(gprWdev[i]->netdev);
-#endif
-
 	prGlueInfo = *((struct GLUE_INFO **) netdev_priv(prDev));
 	if (prGlueInfo == NULL) {
 		DBGLOG(INIT, INFO, "prGlueInfo is NULL\n");
+		wlanFreeNetDev();
+		return WLAN_STATUS_FAILURE;
+	}
+
+	prAdapter = prGlueInfo->prAdapter;
+	if (prAdapter == NULL) {
+		DBGLOG(INIT, INFO, "prAdapter is NULL\n");
 		wlanFreeNetDev();
 		return WLAN_STATUS_FAILURE;
 	}
@@ -5373,56 +5681,38 @@ static int32_t wlanOffAtReset(void)
 #if CFG_MTK_ANDROID_WMT
 	update_driver_loaded_status(prGlueInfo->u4ReadyFlag);
 #endif
-
-	prAdapter = prGlueInfo->prAdapter;
-	if (prAdapter == NULL) {
-		DBGLOG(INIT, INFO, "prAdapter is NULL\n");
-		wlanFreeNetDev();
-		return WLAN_STATUS_FAILURE;
-	}
-
+#if (CFG_SUPPORT_PERMON == 1)
 	kalPerMonDestroy(prGlueInfo);
+#endif
 
-	/* complete possible pending oid, which may block wlanRemove some time
-	 * and then whole chip reset may failed
-	 */
-	wlanReleasePendingOid(prGlueInfo->prAdapter, 1);
-
-	flush_delayed_work(&workq);
-
-	flush_delayed_work(&sched_workq);
-
+#if CFG_SUPPORT_MULTITHREAD
+	/* Stop works */
+	flush_work(&prGlueInfo->rTxMsduFreeWork);
+#endif
 	/* 4 <2> Mark HALT, notify main thread to stop, and clean up queued
 	 *	 requests
 	 */
 	set_bit(GLUE_FLAG_HALT_BIT, &prGlueInfo->ulFlag);
-
-	/* Stop works */
-	flush_work(&prGlueInfo->rTxMsduFreeWork);
-
 	wlanOffStopWlanThreads(prGlueInfo);
+	if (HAL_IS_TX_DIRECT(prAdapter)) {
+		if (prAdapter->fgTxDirectInited) {
+			del_timer_sync(&prAdapter->rTxDirectSkbTimer);
+			del_timer_sync(&prAdapter->rTxDirectHifTimer);
+		}
+	}
 
-#if CFG_SUPPORT_RX_GRO
-	kalGROTimerUninit(prAdapter);
-#endif /* CFG_SUPPORT_RX_GRO */
+/* wlanAdapterStop Section Start */
+	wlanOffClearAllQueues(prAdapter);
 
-	wlanAdapterStop(prAdapter, TRUE);
+	wlanOffUninitNicModule(prAdapter, TRUE);
+/* wlanAdapterStop Section End */
 
 	/* 4 <x> Stopping handling interrupt and free IRQ */
-	prBusInfo = prAdapter->chip_info->bus_info;
-	nicDisableInterrupt(prAdapter);
-	if (prBusInfo->disableSwInterrupt)
-		prBusInfo->disableSwInterrupt(prAdapter);
 	glBusFreeIrq(prDev, prGlueInfo);
 
 #if (CFG_SUPPORT_TRACE_TC4 == 1)
 	wlanDebugTC4Uninit();
 #endif
-
-#if (CFG_SUPPORT_STATISTICS == 1)
-	wlanWakeStaticsUninit();
-#endif
-
 	fgSimplifyResetFlow = TRUE;
 
 	return WLAN_STATUS_SUCCESS;
@@ -5437,7 +5727,7 @@ static int32_t wlanOffAtReset(void)
  * WLAN_STATUS_SUCCESS - reset on success
  */
 /*----------------------------------------------------------------------------*/
-static int32_t wlanOnAtReset(void)
+int32_t wlanOnAtReset(void)
 {
 	struct net_device *prDev = NULL;
 	struct GLUE_INFO *prGlueInfo = NULL;
@@ -5458,7 +5748,7 @@ static int32_t wlanOnAtReset(void)
 		FAIL_REASON_NUM
 	} eFailReason = FAIL_REASON_NUM;
 
-	DBGLOG(INIT, INFO, "Driver On during Reset\n");
+	DBGLOG(INIT, STATE, "[SER] Driver On during Reset\n");
 
 	if (u4WlanDevNum > 0
 		&& u4WlanDevNum <= CFG_MAX_WLAN_DEVICES) {
@@ -5489,21 +5779,12 @@ static int32_t wlanOnAtReset(void)
 #if (CFG_SUPPORT_TRACE_TC4 == 1)
 		wlanDebugTC4Init();
 #endif
-#if (CFG_SUPPORT_STATISTICS == 1)
-		wlanWakeStaticsInit();
-#endif
-
-		if (prGlueInfo->i4TxPendingCmdNum != 0) {
-			DBGLOG(INIT, INFO, "wlanOnReset clear %d command\n",
-				prGlueInfo->i4TxPendingCmdNum);
-
-			kalClearCommandQueue(prAdapter->prGlueInfo, FALSE);
-		}
-
 		/* wlanNetCreate partial process */
 		QUEUE_INITIALIZE(&prGlueInfo->rCmdQueue);
 		prGlueInfo->i4TxPendingCmdNum = 0;
 		QUEUE_INITIALIZE(&prGlueInfo->rTxQueue);
+
+		glResetHifInfo(prGlueInfo);
 
 		rStatus = glBusSetIrq(prDev, NULL, prGlueInfo);
 		if (rStatus != WLAN_STATUS_SUCCESS) {
@@ -5524,10 +5805,14 @@ static int32_t wlanOnAtReset(void)
 			break;
 		}
 
-		wlanOnPreNetRegister(prGlueInfo, prAdapter,
-			prAdapter->chip_info,
-			&prAdapter->rWifiVar,
-			TRUE);
+		if (wlanOnPreNetRegister(prGlueInfo, prAdapter,
+					 prAdapter->chip_info,
+					 &prAdapter->rWifiVar,
+					 TRUE)) {
+			rStatus = WLAN_STATUS_FAILURE;
+			eFailReason = NET_REGISTER_FAIL;
+			break;
+		}
 
 		/* Resend schedule scan */
 		prAdapter->rWifiVar.rScanInfo.fgSchedScanning = FALSE;
@@ -5561,8 +5846,24 @@ static int32_t wlanOnAtReset(void)
 		wlanOnWhenProbeSuccess(prGlueInfo, prAdapter, TRUE);
 		DBGLOG(INIT, INFO, "reset success\n");
 
+		/* Clear pending request (SCAN). */
+		scnFreeAllPendingScanRquests(prAdapter);
+
 		/* Send disconnect */
 		for (u4Idx = 0; u4Idx < KAL_AIS_NUM; u4Idx++) {
+			/* Clear pending request (AIS). */
+			aisFsmFlushRequest(prAdapter, u4Idx);
+
+			/* If scan state is SCAN_STATE_SCANNING, means
+			 * that have scan req not done before SER.
+			 * Abort this request to prevent scan fail
+			 * (scan state back to IDLE).
+			 */
+			if (prAdapter->rWifiVar.rScanInfo.eCurrentState
+				== SCAN_STATE_SCANNING) {
+				aisFsmStateAbort_SCAN(prAdapter, u4Idx);
+			};
+
 			rStatus = kalIoctlByBssIdx(prGlueInfo,
 				wlanoidSetDisassociate,
 				&u4DisconnectReason,
@@ -5591,6 +5892,11 @@ static int32_t wlanOnAtReset(void)
 #if 0
 		switch (eFailReason) {
 		case ADAPTER_START_FAIL:
+			glBusFreeIrq(prDev,
+				*((struct GLUE_INFO **)
+						netdev_priv(prDev)));
+			kal_fallthrough;
+		case BUS_SET_IRQ_FAIL:
 			wlanWakeLockUninit(prGlueInfo);
 			wlanNetDestroy(prDev->ieee80211_ptr);
 			/* prGlueInfo->prAdapter is released in
@@ -5631,7 +5937,6 @@ static int32_t wlanProbe(void *pvData, void *pvDriverData)
 		NET_REGISTER_FAIL,
 		PROC_INIT_FAIL,
 		FAIL_MET_INIT_PROCFS,
-		FAIL_BY_RESET,
 		FAIL_REASON_NUM
 	} eFailReason;
 	struct WLANDEV_INFO *prWlandevInfo = NULL;
@@ -5644,35 +5949,20 @@ static int32_t wlanProbe(void *pvData, void *pvDriverData)
 	struct REG_INFO *prRegInfo;
 	struct mt66xx_chip_info *prChipInfo;
 	struct WIFI_VAR *prWifiVar;
+#if (MTK_WCN_HIF_SDIO && CFG_WMT_WIFI_PATH_SUPPORT)
+	int32_t i4RetVal = 0;
+#endif
 	uint32_t u4Idx = 0;
-#if (CFG_SUPPORT_POWER_THROTTLING == 1)
-	struct mt66xx_hif_driver_data *prHifDriverData;
-#endif
-
-#if CFG_MTK_MDDP_SUPPORT
-	mddpNotifyWifiOnStart();
-#endif
 
 #if CFG_CHIP_RESET_SUPPORT
-	if (fgSimplifyResetFlow) {
-		i4Status = wlanOnAtReset();
-#if CFG_MTK_MDDP_SUPPORT
-		if (i4Status == WLAN_STATUS_SUCCESS)
-			mddpNotifyWifiOnEnd();
-#endif
-		return i4Status;
-	}
-	fgIsResetting = FALSE;
-#if (CFG_SUPPORT_CONNINFRA == 1)
-	update_driver_reset_status(fgIsResetting);
-#endif
+	if (fgSimplifyResetFlow)
+		return wlanOnAtReset();
 #endif
 
 #if 0
 	uint8_t *pucConfigBuf = NULL, pucCfgBuf = NULL;
 	uint32_t u4ConfigReadLen = 0;
 #endif
-
 	eFailReason = FAIL_REASON_NUM;
 	do {
 		/* 4 <1> Initialize the IO port of the interface */
@@ -5681,6 +5971,10 @@ static int32_t wlanProbe(void *pvData, void *pvDriverData)
 		 *      initialized by glBusInit().
 		 * _HIF_SDIO: bus driver handle
 		 */
+#ifdef CFG_CHIP_RESET_KO_SUPPORT
+		rstNotifyWholeChipRstStatus(RST_MODULE_WIFI,
+			RST_MODULE_STATE_PROBE_START, NULL);
+#endif
 
 		DBGLOG(INIT, INFO, "enter wlanProbe\n");
 
@@ -5688,10 +5982,6 @@ static int32_t wlanProbe(void *pvData, void *pvDriverData)
 
 #if (CFG_SUPPORT_TRACE_TC4 == 1)
 		wlanDebugTC4Init();
-#endif
-
-#if (CFG_SUPPORT_STATISTICS == 1)
-		wlanWakeStaticsInit();
 #endif
 		/* Cannot get IO address from interface */
 		if (bRet == FALSE) {
@@ -5712,7 +6002,7 @@ static int32_t wlanProbe(void *pvData, void *pvDriverData)
 			break;
 		}
 		/* 4 <2.5> Set the ioaddr to HIF Info */
-		WIPHY_PRIV(prWdev->wiphy, prGlueInfo);
+		prGlueInfo = (struct GLUE_INFO *) wiphy_priv(prWdev->wiphy);
 		gPrDev = prGlueInfo->prDevHandler;
 
 		/* 4 <4> Setup IRQ */
@@ -5749,19 +6039,12 @@ static int32_t wlanProbe(void *pvData, void *pvDriverData)
 			break;
 		}
 
-		wlanOnPreNetRegister(prGlueInfo, prAdapter, prChipInfo,
-			prWifiVar, FALSE);
-
-#if (CFG_SUPPORT_POWER_THROTTLING == 1)
-		prHifDriverData = (struct mt66xx_hif_driver_data *)pvDriverData;
-		prAdapter->u4PwrLevel = prHifDriverData->u4PwrLevel;
-		kalMemCopy(&prAdapter->rTempInfo, &prHifDriverData->rTempInfo,
-				sizeof(struct conn_pwr_event_max_temp));
-		connsys_power_event_notification(CONN_PWR_EVENT_LEVEL,
-				&(prAdapter->u4PwrLevel));
-		connsys_power_event_notification(CONN_PWR_EVENT_MAX_TEMP,
-				&prAdapter->rTempInfo);
-#endif
+		if (wlanOnPreNetRegister(prGlueInfo, prAdapter, prChipInfo,
+					 prWifiVar, FALSE)) {
+			i4Status = -EIO;
+			eFailReason = NET_REGISTER_FAIL;
+			break;
+		}
 
 		/* 4 <3> Register the card */
 		i4DevIdx = wlanNetRegister(prWdev);
@@ -5793,18 +6076,14 @@ static int32_t wlanProbe(void *pvData, void *pvDriverData)
 		}
 #endif /* WLAN_INCLUDE_SYS */
 
-#ifdef CFG_SUPPORT_SNIFFER_RADIOTAP
+#if (CFG_SUPPORT_SNIFFER_RADIOTAP == 1)
 		prGlueInfo->fgIsEnableMon = FALSE;
-		prGlueInfo->ucBandIdx = 0;
-		prGlueInfo->fgDropFcsErrorFrame = TRUE;
-		prGlueInfo->u2Aid = 1;
+		sysCreateMonDbgFs(prGlueInfo);
 #endif
 
 #if CFG_MET_PACKET_TRACE_SUPPORT
 	kalMetInit(prGlueInfo);
 #endif
-
-		kalWlanUeventInit();
 
 #if CFG_ENABLE_BT_OVER_WIFI
 	prGlueInfo->rBowInfo.fgIsNetRegistered = FALSE;
@@ -5874,65 +6153,48 @@ static int32_t wlanProbe(void *pvData, void *pvDriverData)
 #endif
 	} while (FALSE);
 
-	if (i4Status == 0 && kalIsResetting()) {
-		DBGLOG(INIT, WARN, "Fake wlan on success due to reset.\n");
-		eFailReason = FAIL_BY_RESET;
-		i4Status = WLAN_STATUS_FAILURE;
-	}
-
 	if (i4Status == 0) {
 		wlanOnWhenProbeSuccess(prGlueInfo, prAdapter, FALSE);
 		DBGLOG(INIT, INFO,
 		       "wlanProbe: probe success, feature set: 0x%llx, persistNetdev: %d\n",
 		       wlanGetSupportedFeatureSet(prGlueInfo),
 		       CFG_SUPPORT_PERSIST_NETDEV);
-#if CFG_MTK_MDDP_SUPPORT
-		mddpNotifyWifiOnEnd();
-#endif
+		wlanOnP2pRegistration(prGlueInfo, prAdapter, prWdev);
+#if CFG_SUPPORT_TPENHANCE_MODE
+		wlanTpeInit(prGlueInfo);
+#endif /* CFG_SUPPORT_TPENHANCE_MODE */
 	} else {
 		DBGLOG(INIT, ERROR, "wlanProbe: probe failed, reason:%d\n",
 		       eFailReason);
 		switch (eFailReason) {
-		case FAIL_BY_RESET:
+#if CFG_MET_PACKET_TRACE_SUPPORT
 		case FAIL_MET_INIT_PROCFS:
 			kalMetRemoveProcfs();
+#endif
+			kal_fallthrough;
 		case PROC_INIT_FAIL:
 			wlanNetUnregister(prWdev);
-			/* Unregister notifier callback */
-			wlanUnregisterInetAddrNotifier();
+			kal_fallthrough;
 		case NET_REGISTER_FAIL:
 			set_bit(GLUE_FLAG_HALT_BIT, &prGlueInfo->ulFlag);
-#if CFG_SUPPORT_MULTITHREAD
-			wake_up_interruptible(&prGlueInfo->waitq_hif);
-			wait_for_completion_interruptible(
-				&prGlueInfo->rHifHaltComp);
-			wake_up_interruptible(&prGlueInfo->waitq_rx);
-			wait_for_completion_interruptible(
-				&prGlueInfo->rRxHaltComp);
-#endif
 			/* wake up main thread */
 			wake_up_interruptible(&prGlueInfo->waitq);
 			/* wait main thread stops */
 			wait_for_completion_interruptible(
 							&prGlueInfo->rHaltComp);
-			wlanAdapterStop(prAdapter, FALSE);
-		/* fallthrough */
+			wlanAdapterStop(prAdapter);
+			kal_fallthrough;
 		case ADAPTER_START_FAIL:
-			/*reset NVRAM State to ready for the next wifi-no*/
-			if (g_NvramFsm == NVRAM_STATE_SEND_TO_FW)
-				g_NvramFsm = NVRAM_STATE_READY;
 			glBusFreeIrq(prWdev->netdev,
 				*((struct GLUE_INFO **)
 						netdev_priv(prWdev->netdev)));
-		/* fallthrough */
+			kal_fallthrough;
 		case BUS_SET_IRQ_FAIL:
 			wlanWakeLockUninit(prGlueInfo);
 			wlanNetDestroy(prWdev);
 			/* prGlueInfo->prAdapter is released in
 			 * wlanNetDestroy
 			 */
-			/* Set NULL value for local prAdapter as well */
-			prAdapter = NULL;
 			break;
 		case NET_CREATE_FAIL:
 			break;
@@ -5942,6 +6204,12 @@ static int32_t wlanProbe(void *pvData, void *pvDriverData)
 			break;
 		}
 	}
+
+#ifdef CFG_CHIP_RESET_KO_SUPPORT
+	rstNotifyWholeChipRstStatus(RST_MODULE_WIFI,
+		RST_MODULE_STATE_PROBE_DONE, NULL);
+#endif
+
 	return i4Status;
 }				/* end of wlanProbe() */
 
@@ -5992,21 +6260,18 @@ static void wlanRemove(void)
 	struct GLUE_INFO *prGlueInfo = NULL;
 	struct ADAPTER *prAdapter = NULL;
 	u_int8_t fgResult = FALSE;
-#if CFG_SUPPORT_PERSIST_NETDEV
-	uint8_t i;
-#endif
 
 	DBGLOG(INIT, INFO, "Remove wlan!\n");
 
-	kalSetHalted(TRUE);
+	if (atomic_read(&g_wlanRemoving)) {
+		DBGLOG(INIT, ERROR, "wlanRemove in process\n");
+		return;
+	}
+	atomic_set(&g_wlanRemoving, 1);
 
 	/*reset NVRAM State to ready for the next wifi-no*/
 	if (g_NvramFsm == NVRAM_STATE_SEND_TO_FW)
 		g_NvramFsm = NVRAM_STATE_READY;
-
-#if CFG_MTK_MDDP_SUPPORT
-	mddpNotifyWifiOffStart();
-#endif
 
 #if CFG_CHIP_RESET_SUPPORT
 	/* During chip reset, use simplify remove flow first
@@ -6014,18 +6279,19 @@ static void wlanRemove(void)
 	 */
 	if (fgSimplifyResetFlow) {
 		if (wlanOffAtReset() == WLAN_STATUS_SUCCESS) {
-#if CFG_MTK_MDDP_SUPPORT
-			mddpNotifyWifiOffEnd();
-#endif
+			atomic_set(&g_wlanRemoving, 0);
 			return;
 		}
 	}
 #endif
 
+	kalSetHalted(TRUE);
+
 	/* 4 <0> Sanity check */
 	ASSERT(u4WlanDevNum <= CFG_MAX_WLAN_DEVICES);
 	if (u4WlanDevNum == 0) {
 		DBGLOG(INIT, ERROR, "u4WlanDevNum = 0\n");
+		atomic_set(&g_wlanRemoving, 0);
 		return;
 	}
 #if (CFG_ENABLE_WIFI_DIRECT && CFG_MTK_ANDROID_WMT)
@@ -6040,30 +6306,31 @@ static void wlanRemove(void)
 	ASSERT(prDev);
 	if (prDev == NULL) {
 		DBGLOG(INIT, ERROR, "prDev is NULL\n");
+		atomic_set(&g_wlanRemoving, 0);
 		return;
 	}
-
-#if CFG_SUPPORT_PERSIST_NETDEV
-	for (i = 0; i < KAL_AIS_NUM; i++)
-		netif_device_detach(gprWdev[i]->netdev);
-#endif
 
 	prGlueInfo = *((struct GLUE_INFO **) netdev_priv(prDev));
 	ASSERT(prGlueInfo);
 	if (prGlueInfo == NULL) {
 		DBGLOG(INIT, INFO, "prGlueInfo is NULL\n");
 		wlanFreeNetDev();
+		atomic_set(&g_wlanRemoving, 0);
 		return;
 	}
 
-	/* to avoid that wpa_supplicant/hostapd triogger new cfg80211 command */
-	prGlueInfo->u4ReadyFlag = 0;
-#if CFG_MTK_ANDROID_WMT
-	update_driver_loaded_status(prGlueInfo->u4ReadyFlag);
-#endif
-
 #if (CONFIG_WLAN_SERVICE == 1)
 	wlanServiceExit(prGlueInfo);
+#endif
+
+	/* Hold mutex in order to asynchronously check whether the net */
+	/* interface is available					*/
+	KAL_ACQUIRE_MUTEX(prGlueInfo->prAdapter, MUTEX_DEL_INF);
+	/* to avoid that wpa_supplicant/hostapd triogger new cfg80211 command */
+	prGlueInfo->u4ReadyFlag = 0;
+	KAL_RELEASE_MUTEX(prGlueInfo->prAdapter, MUTEX_DEL_INF);
+#if CFG_MTK_ANDROID_WMT
+	update_driver_loaded_status(prGlueInfo->u4ReadyFlag);
 #endif
 
 	/* Have tried to do scan done here, but the exception occurs for */
@@ -6076,27 +6343,30 @@ static void wlanRemove(void)
 #if WLAN_INCLUDE_SYS
 	sysRemoveSysfs();
 #endif /* WLAN_INCLUDE_SYS */
-
+#if (CFG_SUPPORT_SNIFFER_RADIOTAP == 1)
+	sysRemoveMonDbgFs();
+#endif
 	prAdapter = prGlueInfo->prAdapter;
+#if (CFG_SUPPORT_PERMON == 1)
 	kalPerMonDestroy(prGlueInfo);
-
-	/* Unregister notifier callback */
-	wlanUnregisterInetAddrNotifier();
-
-	/*backup EM mode cfg setting*/
-	wlanBackupEmCfgSetting(prAdapter);
+#endif
 
 #if CFG_SUPPORT_TPENHANCE_MODE
 	wlanTpeUninit(prGlueInfo);
 #endif /* CFG_SUPPORT_TPENHANCE_MODE */
+
+	/* Need to get A-DIE ver anytime when device plug in,
+	 * or will fail on the case with insert different A-DIE card.
+	 */
+	prAdapter->chip_info->u4ADieVer = 0xFFFFFFFF;
+
+	prAdapter->CurNoResSeqID = 0;
 
 	/* complete possible pending oid, which may block wlanRemove some time
 	 * and then whole chip reset may failed
 	 */
 	if (kalIsResetting())
 		wlanReleasePendingOid(prGlueInfo->prAdapter, 1);
-
-	nicSerDeInit(prGlueInfo->prAdapter);
 
 #if CFG_ENABLE_BT_OVER_WIFI
 	if (prGlueInfo->rBowInfo.fgIsNetRegistered) {
@@ -6112,6 +6382,21 @@ static void wlanRemove(void)
 
 	flush_delayed_work(&sched_workq);
 
+#if CFG_REDIRECT_OID_SUPPORT
+	flush_delayed_work(&oid_workq);
+#endif
+
+#if (CFG_SUPPORT_SUPPLICANT_SME == 1)
+#if CFG_SUPPORT_CFG80211_QUEUE
+	flush_delayed_work(&cfg80211_workq);
+#endif
+#endif
+
+#if CFG_AP_80211KVR_INTERFACE
+	cancel_delayed_work_sync(&prAdapter->prGlueInfo->rChanNoiseControlWork);
+	cancel_delayed_work_sync(&prAdapter->prGlueInfo->rChanNoiseGetInfoWork);
+#endif
+
 	down(&g_halt_sem);
 	g_u4HaltFlag = 1;
 	up(&g_halt_sem);
@@ -6122,8 +6407,12 @@ static void wlanRemove(void)
 	set_bit(GLUE_FLAG_HALT_BIT, &prGlueInfo->ulFlag);
 
 	/* Stop works */
+#if CFG_SUPPORT_MULTITHREAD
 	flush_work(&prGlueInfo->rTxMsduFreeWork);
+#endif
 	cancel_delayed_work_sync(&prGlueInfo->rRxPktDeAggWork);
+
+	nicSerDeInit(prGlueInfo->prAdapter);
 
 	wlanOffStopWlanThreads(prGlueInfo);
 
@@ -6161,10 +6450,6 @@ static void wlanRemove(void)
 	kalReleaseUserSock(prGlueInfo);
 #endif
 
-#if (CFG_SUPPORT_POWER_THROTTLING == 1)
-	kalPwrLevelHdlrUnregisterAll(prAdapter);
-#endif
-
 #if CFG_ENABLE_BT_OVER_WIFI
 	if (prGlueInfo->rBowInfo.fgIsRegistered)
 		glUnregisterAmpc(prGlueInfo);
@@ -6185,9 +6470,7 @@ static void wlanRemove(void)
 			      0);
 #endif
 
-	wlanAdapterStop(prAdapter, FALSE);
-
-	kalWlanUeventDeinit();
+	wlanAdapterStop(prAdapter);
 
 	HAL_LP_OWN_SET(prAdapter, &fgResult);
 	DBGLOG(INIT, INFO, "HAL_LP_OWN_SET(%d)\n",
@@ -6202,11 +6485,6 @@ static void wlanRemove(void)
 #if (CFG_SUPPORT_TRACE_TC4 == 1)
 	wlanDebugTC4Uninit();
 #endif
-
-#if (CFG_SUPPORT_STATISTICS == 1)
-	wlanWakeStaticsUninit();
-#endif
-
 	/* 4 <6> Unregister the card */
 	wlanNetUnregister(prDev->ieee80211_ptr);
 
@@ -6214,10 +6492,8 @@ static void wlanRemove(void)
 
 	/* 4 <7> Destroy the device */
 	wlanNetDestroy(prDev->ieee80211_ptr);
-	prDev = NULL;
 
-	tasklet_kill(&prGlueInfo->rTxCompleteTask);
-	tasklet_kill(&prGlueInfo->rRxTask);
+	glTaskletUninit(prGlueInfo);
 
 	/* 4 <8> Unregister early suspend callback */
 #if CFG_ENABLE_EARLY_SUSPEND
@@ -6235,16 +6511,16 @@ static void wlanRemove(void)
 	}
 #endif
 
-#if CFG_CHIP_RESET_SUPPORT
+	/* 4 <9> Unregister notifier callback */
+	wlanUnregisterInetAddrNotifier();
+
+#if CFG_CHIP_RESET_SUPPORT & !CFG_WMT_RESET_API_SUPPORT
 	fgIsResetting = FALSE;
 #if (CFG_SUPPORT_CONNINFRA == 1)
 	update_driver_reset_status(fgIsResetting);
 #endif
 #endif
-
-#if CFG_MTK_MDDP_SUPPORT
-	mddpNotifyWifiOffEnd();
-#endif
+	atomic_set(&g_wlanRemoving, 0);
 }				/* end of wlanRemove() */
 
 /*----------------------------------------------------------------------------*/
@@ -6262,6 +6538,23 @@ static int initWlan(void)
 	int ret = 0;
 	struct GLUE_INFO *prGlueInfo = NULL;
 
+#if (CFG_POWER_ON_DOWNLOAD_EMI_ROM_PATCH == 1)
+#if defined(SOC3_0)
+#if defined(_HIF_AXI)
+/* prPlatDev is already created by initWlan()->glRegisterBus()::axi.c */
+	void *pvData = (void *)prPlatDev;
+	void *pvDriverData = (void *)prPlatDev->id_entry->driver_data;
+#endif
+
+#if defined(_HIF_PCIE)
+	void *pvData = NULL;
+	void *pvDriverData = (void *)&mt66xx_driver_data_soc3_0;
+#endif
+#endif
+
+	struct mt66xx_chip_info *prChipInfo;
+#endif
+
 #if defined(UT_TEST_MODE) && defined(CFG_BUILD_X86_PLATFORM)
 	/* Refer 6765 dts setting */
 	char *ptr = NULL;
@@ -6278,16 +6571,15 @@ static int initWlan(void)
 	gConEmiPhyBase = (phys_addr_t)ptr;
 #endif
 
-	gConEmiPhyBaseFinal = gConEmiPhyBase;
-	gConEmiSizeFinal = gConEmiSize;
 
-#if (CFG_SUPPORT_CONNINFRA == 1)
-	conninfra_get_phy_addr(
-		&gConEmiPhyBaseFinal,
-		(unsigned int *)&gConEmiSizeFinal);
-#endif
 
 	DBGLOG(INIT, INFO, "initWlan\n");
+	atomic_set(&g_wlanRemoving, 0);
+
+#ifdef CFG_CHIP_RESET_KO_SUPPORT
+	rstNotifyWholeChipRstStatus(RST_MODULE_WIFI,
+		RST_MODULE_STATE_KO_INSMOD, NULL);
+#endif
 
 #ifdef CFG_DRIVER_INF_NAME_CHANGE
 
@@ -6322,24 +6614,45 @@ static int initWlan(void)
 	if (gprWdev[0] == NULL)
 		return -ENOMEM;
 
-	WIPHY_PRIV(wlanGetWiphy(), prGlueInfo);
-	if (gprWdev[0])
-		glP2pCreateWirelessDevice(prGlueInfo);
-
+	prGlueInfo = (struct GLUE_INFO *) wiphy_priv(
+			     wlanGetWiphy());
+	if (gprWdev[0]) {
+		/* P2PDev and P2PRole[0] share the same Wdev */
+		if (glP2pCreateWirelessDevice(prGlueInfo) == TRUE)
+			gprP2pWdev = gprP2pRoleWdev[0];
+	}
 	gPrDev = NULL;
 
-#if CFG_MTK_ANDROID_WMT && (CFG_SUPPORT_CONNINFRA == 0)
-	mtk_wcn_wmt_mpu_lock_aquire();
+#if CFG_DC_USB_WOW_CALLBACK
+	/* register system DC wow enable/disable callback function */
+	do {
+		typedef void (*func_ptr) (int (*f) (void));
+		char *func_name = "WifiRegisterPdwncCallback";
+		func_ptr pFunc =
+			(func_ptr)GLUE_SYMBOL_GET(func_name);
+		char *func_name2 = "RegisterPdwncCallbackWifi";
+		func_ptr pFunc2 =
+			(func_ptr)GLUE_SYMBOL_GET(func_name2);
+
+		if (pFunc) {
+			DBGLOG(INIT, ERROR,
+			"Register Wow callback1 success\n");
+				pFunc(&kalDcSetWow);
+			GLUE_SYMBOL_PUT(func_name);
+		} else if (pFunc2) {
+			DBGLOG(INIT, ERROR,
+			"Register Wow callback2 success\n");
+			pFunc2(&kalDcSetWow);
+			GLUE_SYMBOL_PUT(pFunc2);
+		} else
+			DBGLOG(INIT, ERROR,
+			"No Exported Func Found:%s\n",
+			func_name);
+	} while (0);
 #endif
+
 	ret = ((glRegisterBus(wlanProbe,
 			      wlanRemove) == WLAN_STATUS_SUCCESS) ? 0 : -EIO);
-#ifdef CONFIG_WLAN_MTK_EMI
-	/* Set WIFI EMI protection to consys permitted on system boot up */
-	kalSetEmiMpuProtection(gConEmiPhyBaseFinal, true);
-#endif
-#if CFG_MTK_ANDROID_WMT && (CFG_SUPPORT_CONNINFRA == 0)
-	mtk_wcn_wmt_mpu_lock_release();
-#endif
 
 	if (ret == -EIO) {
 		kalUninitIOBuffer();
@@ -6348,26 +6661,49 @@ static int initWlan(void)
 #if (CFG_CHIP_RESET_SUPPORT)
 	glResetInit(prGlueInfo);
 #endif
-	kalFbNotifierReg(prGlueInfo);
+	kalFbNotifierReg((struct GLUE_INFO *) wiphy_priv(
+				 wlanGetWiphy()));
 	wlanRegisterNetdevNotifier();
-
-#if CFG_MODIFY_TX_POWER_BY_BAT_VOLT
-	kalBatNotifierReg(prGlueInfo);
-#endif
 
 #ifdef CONFIG_MTK_CONNSYS_DEDICATED_LOG_PATH
 	wifi_fwlog_event_func_register(consys_log_event_notification);
-	wifi_fwlog_get_fw_ver_register(wlanReadRamCodeReleaseManifest);
-#if (CFG_SUPPORT_ICS == 1)
-	wifi_ics_event_func_register(ics_log_event_notification);
-#endif /* CFG_SUPPORT_ICS */
 #endif
 
-#if CFG_MTK_MDDP_SUPPORT
-	mddpInit();
+#if CFG_MTK_ANDROID_EMI
+	/* Set WIFI EMI protection to consys permitted on system boot up */
+	kalSetEmiMpuProtection(gConEmiPhyBase, true);
 #endif
 
-	g_u4WlanInitFlag = 1;
+#if (CFG_POWER_ON_DOWNLOAD_EMI_ROM_PATCH == 1)
+/* #pragma message("initWlan(2)::CFG_POWER_ON_DOWNLOAD_EMI_ROM_PATCH == 1") */
+/* Power on download MCU ROM EMI + WiFi ROM EMI + ROM patch */
+	wlanPowerOnInit();
+
+#if defined(_HIF_AXI) && defined(SOC3_0)
+/* AXI goes over here, to be conti... */
+#endif
+
+#if defined(_HIF_PCIE) && defined(SOC3_0)
+	prChipInfo = ((struct mt66xx_hif_driver_data *)pvDriverData)->chip_info;
+
+	pvData = (void *)prChipInfo->pdev;
+#endif
+
+	wlanProbe(pvData, pvDriverData);
+#endif
+
+#if CFG_POWER_OFF_CTRL_SUPPORT
+	wlanRegisterRebootNotifier();
+#endif
+#if CFG_AP_80211KVR_INTERFACE
+	nl_sk = netlink_kernel_create(&init_net, NETLINK_OSS_KERNEL, NULL);
+	if (!nl_sk) {
+		DBGLOG(INIT, ERROR, "netlink create failed!\n");
+		return -EBUSY;
+	}
+#endif /* CFG_AP_80211KVR_INTERFACE */
+
+
 	DBGLOG(INIT, INFO, "initWlan::End\n");
 
 	return ret;
@@ -6385,13 +6721,21 @@ static int initWlan(void)
 /* 1 Module Leave Point */
 static void exitWlan(void)
 {
+#if defined(_HIF_USB) || CFG_SUPPORT_PERSIST_NETDEV
+	struct GLUE_INFO *prGlueInfo = NULL;
+#endif
+
+#if CFG_AP_80211KVR_INTERFACE
+	if (nl_sk != NULL)
+		netlink_kernel_release(nl_sk);
+#endif /* CFG_AP_80211KVR_INTERFACE */
+
 #if CFG_SUPPORT_PERSIST_NETDEV
 	uint32_t u4Idx = 0;
-	struct GLUE_INFO *prGlueInfo = NULL;
 	struct wiphy *wiphy = NULL;
 
 	wiphy = wlanGetWiphy();
-	WIPHY_PRIV(wiphy, prGlueInfo);
+	prGlueInfo = (struct GLUE_INFO *) wiphy_priv(wiphy);
 
 	for (u4Idx = 0; u4Idx < KAL_AIS_NUM; u4Idx++) {
 		if (gprNetdev[u4Idx]) {
@@ -6410,19 +6754,59 @@ static void exitWlan(void)
 	DBGLOG(INIT, INFO, "Free wlan device..\n");
 	wlanFreeNetDev();
 #endif
-	kalFbNotifierUnReg();
-	wlanUnregisterNetdevNotifier();
 
-	/* printk("remove %p\n", wlanRemove); */
-#if CFG_MODIFY_TX_POWER_BY_BAT_VOLT
-	kalBatNotifierUnReg();
+#ifdef CFG_CHIP_RESET_KO_SUPPORT
+	rstNotifyWholeChipRstStatus(RST_MODULE_WIFI,
+		RST_MODULE_STATE_KO_RMMOD, NULL);
 #endif
+
+	kalFbNotifierUnReg();
+
+	wlanUnregisterNetdevNotifier();
 
 #if CFG_CHIP_RESET_SUPPORT
 	glResetUninit();
 #endif
 
+#if defined(_HIF_USB)
+	/* for USB remove ko case, Power off Wifi CMD need to be DONE
+	 * before unregister bus, or connsys cannot enter deep sleep
+	 * after rmmod
+	 */
+	prGlueInfo = wlanGetGlueInfo();
+	if (prGlueInfo != NULL)
+		wlanPowerOffWifi(prGlueInfo->prAdapter);
+#endif
+
 	glUnregisterBus(wlanRemove);
+
+#if CFG_DC_USB_WOW_CALLBACK
+	/*Unregister system DC wow enable/disable callback function */
+	do {
+		typedef void (*func_ptr) (int (*f) (void));
+		char *func_name = "WifiRegisterPdwncCallback";
+		func_ptr pFunc =
+			(func_ptr)GLUE_SYMBOL_GET(func_name);
+		char *func_name2 = "RegisterPdwncCallbackWifi";
+		func_ptr pFunc2 =
+			(func_ptr)GLUE_SYMBOL_GET(func_name2);
+
+		if (pFunc) {
+			DBGLOG(INIT, STATE,
+			"Unregister Wow callback1 success\n");
+			pFunc(NULL);
+			GLUE_SYMBOL_PUT(func_name);
+		} else if (pFunc2) {
+			DBGLOG(INIT, STATE,
+			"Unregister Wow callback2 success\n");
+			pFunc2(NULL);
+			GLUE_SYMBOL_PUT(func_name2);
+		} else
+			DBGLOG(INIT, ERROR,
+			"No Exported Func Found:%s\n",
+			func_name);
+		} while (0);
+#endif
 
 	/* free pre-allocated memory */
 	kalUninitIOBuffer();
@@ -6442,19 +6826,110 @@ static void exitWlan(void)
 #if defined(UT_TEST_MODE) && defined(CFG_BUILD_X86_PLATFORM)
 	kfree((const void *)gConEmiPhyBase);
 #endif
-
-#ifdef CONFIG_MTK_CONNSYS_DEDICATED_LOG_PATH
-	wifi_fwlog_get_fw_ver_register(NULL);
+#if CFG_POWER_OFF_CTRL_SUPPORT
+	wlanUnregisterRebootNotifier();
 #endif
 
-#if CFG_MTK_MDDP_SUPPORT
-	mddpUninit();
-#endif
-
-	g_u4WlanInitFlag = 0;
 	DBGLOG(INIT, INFO, "exitWlan\n");
 
 }				/* end of exitWlan() */
+
+#if CFG_POWER_OFF_CTRL_SUPPORT
+static int wf_pdwnc_notify(struct notifier_block *nb,
+		unsigned long event, void *unused)
+{
+	if (event == SYS_RESTART) {
+		DBGLOG(HAL, STATE, "wf_pdwnc_notify()\n");
+#if CFG_SUPPORT_PERSIST_NETDEV
+		uint32_t u4Idx = 0;
+		struct GLUE_INFO *prGlueInfo = NULL;
+		struct wiphy *wiphy = NULL;
+
+		wiphy = wlanGetWiphy();
+		prGlueInfo = (struct GLUE_INFO *) wiphy_priv(wiphy);
+
+		for (u4Idx = 0; u4Idx < KAL_AIS_NUM; u4Idx++) {
+			if (gprNetdev[u4Idx]) {
+				wlanClearDevIdx(gprWdev[u4Idx]->netdev);
+				DBGLOG(INIT, INFO,
+					"Unregister wlan%d netdev start.\n",
+						u4Idx);
+				unregister_netdev(gprWdev[u4Idx]->netdev);
+				DBGLOG(INIT, INFO,
+					"Unregister wlan%d netdev end.\n",
+						u4Idx);
+				gprWdev[u4Idx]->netdev = NULL;
+				gprNetdev[u4Idx] = NULL;
+			}
+		}
+
+		prGlueInfo->fgIsRegistered = FALSE;
+
+		DBGLOG(INIT, INFO, "Free wlan device..\n");
+		wlanFreeNetDev();
+#endif
+		kalFbNotifierUnReg();
+
+		wlanUnregisterNetdevNotifier();
+
+#if CFG_CHIP_RESET_SUPPORT
+		glResetUninit();
+#endif
+
+		glUnregisterBus(wlanRemove);
+
+		/* free pre-allocated memory */
+		kalUninitIOBuffer();
+
+		/* For single wiphy case, it's hardly
+		 * to free wdev & wiphy in 2 func.
+		 * So that, use wlanDestroyAllWdev
+		 * to replace wlanDestroyWirelessDevice
+		 * and glP2pDestroyWirelessDevice.
+		 */
+		wlanDestroyAllWdev();
+
+#if WLAN_INCLUDE_PROC
+		procUninitProcFs();
+#endif
+#if WLAN_INCLUDE_SYS
+		sysUninitSysFs();
+#endif
+#if defined(UT_TEST_MODE) && defined(CFG_BUILD_X86_PLATFORM)
+		kfree((const void *)gConEmiPhyBase);
+#endif
+
+		DBGLOG(HAL, STATE, "wf_pdwnc_notify() done\n");
+	}
+
+	if (event == SYS_POWER_OFF || event == SYS_HALT) {
+		DBGLOG(HAL, STATE, "DC Set WoW\n");
+		kalDcSetWow();
+	}
+	return 0;
+}
+
+static struct notifier_block wf_pdwnc_notifier = {
+	.notifier_call = wf_pdwnc_notify,
+	.next = NULL,
+	.priority = 0,
+};
+
+void wlanRegisterRebootNotifier(void)
+{
+	DBGLOG(HAL, STATE, "wlanRegisterRebootNotifier()\n");
+	register_reboot_notifier(&wf_pdwnc_notifier);
+	DBGLOG(HAL, STATE, "wlanRegisterRebootNotifier() done\n");
+}
+
+void wlanUnregisterRebootNotifier(void)
+{
+	DBGLOG(HAL, STATE, "wlanUnregisterRebootNotifier()\n");
+	unregister_reboot_notifier(&wf_pdwnc_notifier);
+	DBGLOG(HAL, STATE, "wlanUnregisterRebootNotifier() done\n");
+}
+
+#endif
 
 #if ((MTK_WCN_HIF_SDIO == 1) && (CFG_BUILT_IN_DRIVER == 1)) || \
 	((MTK_WCN_HIF_AXI == 1) && (CFG_BUILT_IN_DRIVER == 1))

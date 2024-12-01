@@ -1,20 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2016 MediaTek Inc.
- *
- * This program is free software: you can redistribute it and/or modify it under
- * the terms of the
- * GNU General Public License version 2 as published by the Free Software
- * Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY;
- * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
- * PARTICULAR PURPOSE.
- * See the GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.
- * If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (c) 2016 MediaTek Inc.
  */
 
 #include "precomp.h"
@@ -390,47 +376,11 @@ uint8_t wmmCalculateUapsdSetting(struct ADAPTER *prAdapter,
 	return ucFinalSetting;
 }
 
-void wmmSyncPsParamWithFw(struct ADAPTER *prAdapter, uint8_t ucAc,
-	uint8_t ucBssIndex)
-{
-	struct CMD_SET_WMM_PS_TEST_STRUCT rSetWmmPsTestParam;
-	struct BSS_INFO *prAisBssInfo = NULL;
-
-	prAisBssInfo = aisGetAisBssInfo(prAdapter, ucBssIndex);
-	if (prAisBssInfo == NULL)
-		return;
-
-	kalMemZero(&rSetWmmPsTestParam, sizeof(rSetWmmPsTestParam));
-	rSetWmmPsTestParam.ucBssIndex = prAisBssInfo->ucBssIndex;
-	rSetWmmPsTestParam.bmfgApsdEnAc =
-		wmmCalculateUapsdSetting(prAdapter, prAisBssInfo->ucBssIndex);
-	wlanSendSetQueryCmd(prAdapter, CMD_ID_SET_WMM_PS_TEST_PARMS, TRUE,
-			    FALSE, FALSE, NULL, NULL,
-			    sizeof(struct CMD_SET_WMM_PS_TEST_STRUCT),
-			    (uint8_t *)&rSetWmmPsTestParam, NULL, 0);
-
-	DBGLOG(WMM, INFO, "Ac=%d, Uapsd 0x%02x\n",
-	       ucAc, rSetWmmPsTestParam.bmfgApsdEnAc);
-}
-
-void wmmReSyncPsParamWithFw(struct ADAPTER *prAdapter, uint8_t ucBssIndex)
-{
-	struct WMM_INFO *prWmmInfo = aisGetWMMInfo(prAdapter, ucBssIndex);
-	struct TSPEC_INFO *prCurTs = NULL;
-	uint8_t ucTid = 0;
-
-	for (ucTid = 0; ucTid < WMM_TSPEC_ID_NUM; ucTid++) {
-		prCurTs = &prWmmInfo->arTsInfo[ucTid];
-		if (prCurTs->eState == QOS_TS_ACTIVE)
-			wmmSyncPsParamWithFw(
-				prAdapter, prCurTs->eAC, ucBssIndex);
-	}
-}
-
 void wmmSyncAcParamWithFw(struct ADAPTER *prAdapter, uint8_t ucAc,
 	uint16_t u2MediumTime, uint32_t u4PhyRate,
 	uint8_t ucBssIndex)
 {
+	struct CMD_SET_WMM_PS_TEST_STRUCT rSetWmmPsTestParam;
 #if CFG_SUPPORT_SOFT_ACM
 	struct SOFT_ACM_CTRL *prAcmCtrl = NULL;
 #endif
@@ -461,11 +411,18 @@ void wmmSyncAcParamWithFw(struct ADAPTER *prAdapter, uint8_t ucAc,
 	wlanSendSetQueryCmd(prAdapter, CMD_ID_UPDATE_AC_PARMS, TRUE, FALSE,
 		FALSE, NULL, NULL, sizeof(struct CMD_UPDATE_AC_PARAMS),
 		(uint8_t *)&rCmdUpdateAcParam, NULL, 0);
+	kalMemZero(&rSetWmmPsTestParam, sizeof(rSetWmmPsTestParam));
+	rSetWmmPsTestParam.ucBssIndex = prAisBssInfo->ucBssIndex;
+	rSetWmmPsTestParam.bmfgApsdEnAc =
+		wmmCalculateUapsdSetting(prAdapter,
+		prAisBssInfo->ucBssIndex);
+	wlanSendSetQueryCmd(prAdapter, CMD_ID_SET_WMM_PS_TEST_PARMS, TRUE,
+			    FALSE, FALSE, NULL, NULL,
+			    sizeof(struct CMD_SET_WMM_PS_TEST_STRUCT),
+			    (uint8_t *)&rSetWmmPsTestParam, NULL, 0);
 
-	DBGLOG(WMM, INFO, "Ac=%d, MediumTime=%d PhyRate=%u\n",
-	       ucAc, u2MediumTime, u4PhyRate);
-
-	wmmSyncPsParamWithFw(prAdapter, ucAc, ucBssIndex);
+	DBGLOG(WMM, INFO, "Ac=%d, MediumTime=%d PhyRate=%u Uapsd 0x%02x\n",
+	       ucAc, u2MediumTime, u4PhyRate, rSetWmmPsTestParam.bmfgApsdEnAc);
 }
 
 /* Return: AC List in bit map if this ac has active tspec */
@@ -756,7 +713,7 @@ static void wmmQueryTsmResult(struct ADAPTER *prAdapter,
 		((struct ACTIVE_RM_TSM_REQ *)ulParam)->prTsmReq;
 	struct WMM_INFO *prWmmInfo =
 		aisGetWMMInfo(prAdapter, ucBssIndex);
-	struct CMD_GET_TSM_STATISTICS rGetTsmStatistics = {0};
+	struct CMD_GET_TSM_STATISTICS rGetTsmStatistics;
 
 	DBGLOG(WMM, INFO, "[%d] Query TSM statistics, tid = %d\n",
 		ucBssIndex,
@@ -764,6 +721,7 @@ static void wmmQueryTsmResult(struct ADAPTER *prAdapter,
 	DBGLOG(WMM, INFO, "%p , aci %d, duration %d\n", prTsmReq,
 		prTsmReq->ucACI, prTsmReq->u2Duration);
 
+	memset(&rGetTsmStatistics, 0, sizeof(struct CMD_GET_TSM_STATISTICS));
 	rGetTsmStatistics.ucBssIdx = ucBssIndex;
 	rGetTsmStatistics.ucAcIndex = prTsmReq->ucACI;
 	rGetTsmStatistics.ucTid = prTsmReq->ucTID;
@@ -823,7 +781,7 @@ static void wmmRemoveTSM(struct ADAPTER *prAdapter,
 
 	LINK_REMOVE_KNOWN_ENTRY(prActiveTsmLink, prActiveTsm);
 	if (fgNeedStop) {
-		struct CMD_SET_TSM_STATISTICS_REQUEST rTsmStatistics = {0};
+		struct CMD_SET_TSM_STATISTICS_REQUEST rTsmStatistics;
 		struct STA_RECORD *prStaRec = NULL;
 		struct BSS_INFO *prAisBssInfo;
 
@@ -839,6 +797,8 @@ static void wmmRemoveTSM(struct ADAPTER *prAdapter,
 					prStaRec,
 					prActiveTsm->prTsmReq->ucACI,
 					FALSE);
+		memset(&rTsmStatistics, 0,
+			sizeof(struct CMD_SET_TSM_STATISTICS_REQUEST));
 		rTsmStatistics.ucBssIdx = prAisBssInfo->ucBssIndex;
 		rTsmStatistics.ucEnabled = FALSE;
 		rTsmStatistics.ucAcIndex = prActiveTsm->prTsmReq->ucACI;
@@ -884,8 +844,8 @@ void wmmStartTsmMeasurement(struct ADAPTER *prAdapter, unsigned long ulParam,
 	}
 	prStaRec = prAisBssInfo->prStaRecOfAP;
 	if (!prStaRec) {
-		DBGLOG(WMM, INFO, "No station record found for "MACSTR"\n",
-			MAC2STR(prTsmReq->aucPeerAddr));
+		DBGLOG(WMM, INFO, "No station record found for " MACSTR "\n",
+		       MAC2STR(prTsmReq->aucPeerAddr));
 		cnmMemFree(prAdapter, prTsmReq);
 		rrmScheduleNextRm(prAdapter,
 			ucBssIndex);
@@ -952,49 +912,49 @@ void wmmStartTsmMeasurement(struct ADAPTER *prAdapter, unsigned long ulParam,
 		prActiveTsmReq = wmmGetActiveTsmReq(
 			prAdapter, ucTid, !!prTsmReq->u2Duration, TRUE,
 			ucBssIndex);
-		if (prActiveTsmReq) {
-			/* if exist normal tsm on the same ts, replace it */
-			if (prActiveTsmReq->prTsmReq)
-				cnmMemFree(prAdapter, prActiveTsmReq->prTsmReq);
-			DBGLOG(WMM, INFO, "%p tid %d, aci %d, duration %d\n",
-				prTsmReq, prTsmReq->ucTID, prTsmReq->ucACI,
-				prTsmReq->u2Duration);
-			prActiveTsmReq->ucBssIdx = ucBssIndex;
-			cnmTimerInitTimer(prAdapter, &prWMMInfo->rTsmTimer,
-				wmmQueryTsmResult,
-				(unsigned long)prActiveTsmReq);
-			cnmTimerStartTimer(prAdapter, &prWMMInfo->rTsmTimer,
-					   TU_TO_MSEC(prTsmReq->u2Duration));
+
+		if (!prActiveTsmReq) {
+			DBGLOG(WMM, ERROR, "prActiveTsmReq is NULL!\n");
+			return;
 		}
+
+		/* if exist normal tsm on the same ts, replace it */
+		if (prActiveTsmReq->prTsmReq)
+			cnmMemFree(prAdapter, prActiveTsmReq->prTsmReq);
+		DBGLOG(WMM, INFO, "%p tid %d, aci %d, duration %d\n", prTsmReq,
+		       prTsmReq->ucTID, prTsmReq->ucACI, prTsmReq->u2Duration);
+		prActiveTsmReq->ucBssIdx = ucBssIndex;
+		cnmTimerInitTimer(prAdapter, &prWMMInfo->rTsmTimer,
+			wmmQueryTsmResult,
+			(unsigned long)prActiveTsmReq);
+		cnmTimerStartTimer(prAdapter, &prWMMInfo->rTsmTimer,
+				   TU_TO_MSEC(prTsmReq->u2Duration));
 	} else {
 		prActiveTsmReq = wmmGetActiveTsmReq(
 			prAdapter, ucTid, !prTsmReq->u2Duration, TRUE,
 			ucBssIndex);
-		if (prActiveTsmReq) {
-			/* if exist triggered tsm on the same ts, replace it */
-			if (prActiveTsmReq->prTsmReq) {
-				cnmTimerStopTimer(prAdapter,
-						  &prActiveTsmReq->rTsmTimer);
-				cnmMemFree(prAdapter, prActiveTsmReq->prTsmReq);
-			}
-			rTsmStatistics.ucTriggerCondition =
-				prTsmReq->rTriggerCond.ucCondition;
-			rTsmStatistics.ucMeasureCount =
-				prTsmReq->rTriggerCond.ucMeasureCount;
-			rTsmStatistics.ucTriggerTimeout =
-				prTsmReq->rTriggerCond.ucTriggerTimeout;
-			rTsmStatistics.ucAvgErrThreshold =
-				prTsmReq->rTriggerCond.ucAvgErrThreshold;
-			rTsmStatistics.ucConsecutiveErrThreshold =
-				prTsmReq->rTriggerCond.ucConsecutiveErr;
-			rTsmStatistics.ucDelayThreshold =
-				prTsmReq->rTriggerCond.ucDelayThreshold;
-			rTsmStatistics.ucBin0Range = prTsmReq->ucB0Range;
+		/* if exist triggered tsm on the same ts, replace it */
+		if (prActiveTsmReq->prTsmReq) {
+			cnmTimerStopTimer(prAdapter,
+					  &prActiveTsmReq->rTsmTimer);
+			cnmMemFree(prAdapter, prActiveTsmReq->prTsmReq);
 		}
+		rTsmStatistics.ucTriggerCondition =
+			prTsmReq->rTriggerCond.ucCondition;
+		rTsmStatistics.ucMeasureCount =
+			prTsmReq->rTriggerCond.ucMeasureCount;
+		rTsmStatistics.ucTriggerTimeout =
+			prTsmReq->rTriggerCond.ucTriggerTimeout;
+		rTsmStatistics.ucAvgErrThreshold =
+			prTsmReq->rTriggerCond.ucAvgErrThreshold;
+		rTsmStatistics.ucConsecutiveErrThreshold =
+			prTsmReq->rTriggerCond.ucConsecutiveErr;
+		rTsmStatistics.ucDelayThreshold =
+			prTsmReq->rTriggerCond.ucDelayThreshold;
+		rTsmStatistics.ucBin0Range = prTsmReq->ucB0Range;
 	}
 	nicTxChangeDataPortByAc(prAdapter, prStaRec, prTsmReq->ucACI, TRUE);
-	if (prActiveTsmReq)
-		prActiveTsmReq->prTsmReq = prTsmReq;
+	prActiveTsmReq->prTsmReq = prTsmReq;
 	rTsmStatistics.ucBssIdx = ucBssIndex;
 	rTsmStatistics.ucAcIndex = prTsmReq->ucACI;
 	rTsmStatistics.ucTid = prTsmReq->ucTID;
@@ -1052,6 +1012,8 @@ u_int8_t wmmParseQosAction(IN struct ADAPTER *prAdapter,
 		prSwRfb);
 
 	prWlanActionFrame = (struct WLAN_ACTION_FRAME *)prSwRfb->pvHeader;
+	kalMemZero(&rTspec, sizeof(rTspec));
+
 	DBGLOG(WMM, INFO, "[%d] Action=%d\n",
 		ucBssIndex,
 		prWlanActionFrame->ucAction);
@@ -1108,7 +1070,7 @@ u_int8_t wmmParseQosAction(IN struct ADAPTER *prAdapter,
 					rStepParam.ucApsd =
 						rTspec.rTsInfo.ucApsd;
 				} else {
-					DBGLOG(WMM, INFO,
+					DBGLOG(WMM, WARN,
 					       "can't parse Tspec IE?!\n");
 				}
 				break;
@@ -1496,7 +1458,7 @@ uint32_t wmmDumpActiveTspecs(struct ADAPTER *prAdapter, uint8_t *pucBuffer,
 		if (prStaRec) {
 			i4BytesWritten += kalSnprintf(
 				pucBuffer + i4BytesWritten, u2BufferLen,
-				"\nACM status for AP "MACSTR
+				"\nACM status for AP " MACSTR
 				":\nBE %d; BK %d; VI %d; VO %d\n",
 				MAC2STR(prStaRec->aucMacAddr),
 				prStaRec->afgAcmRequired[ACI_BE],
@@ -1609,11 +1571,12 @@ u_int8_t wmmAcmCanDequeue(struct ADAPTER *prAdapter, uint8_t ucAc,
 	struct WMM_INFO *prWmmInfo =
 		aisGetWMMInfo(prAdapter, ucBssIndex);
 	uint32_t u4CurTime = 0;
-#if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
+#if KERNEL_VERSION(5, 0, 0) <= LINUX_VERSION_CODE
 	struct timespec64 ts;
 #else
 	struct timespec ts;
 #endif
+
 	if (!prWmmInfo) {
 		DBGLOG(WMM, INFO, "prWmmInfo is null %d\n", ucBssIndex);
 		return FALSE;
@@ -1622,7 +1585,7 @@ u_int8_t wmmAcmCanDequeue(struct ADAPTER *prAdapter, uint8_t ucAc,
 	prAcmCtrl = &prWmmInfo->arAcmCtrl[ucAc];
 	if (!prAcmCtrl->u4AdmittedTime)
 		return FALSE;
-#if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
+#if KERNEL_VERSION(5, 0, 0) <= LINUX_VERSION_CODE
 	ktime_get_boottime_ts64(&ts);
 #else
 	get_monotonic_boottime(&ts);
@@ -1676,7 +1639,8 @@ u_int8_t wmmAcmCanDequeue(struct ADAPTER *prAdapter, uint8_t ucAc,
 	 */
 	if (!timerPendingTimer(&prWmmInfo->rAcmDeqTimer)) {
 		uint32_t u4EndMsec = prAcmCtrl->u4IntervalEndSec * 1000;
-#if KERNEL_VERSION(5, 4, 0) <= LINUX_VERSION_CODE
+
+#if KERNEL_VERSION(5, 0, 0) <= LINUX_VERSION_CODE
 		ktime_get_boottime_ts64(&ts);
 #else
 		get_monotonic_boottime(&ts);

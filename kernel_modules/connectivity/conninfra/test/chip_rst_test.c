@@ -140,3 +140,5 @@ int chip_rst_test(void)
 	pr_info("chip_rst_test finish");
 	return 0;
 }
+
+

@@ -41,3 +41,4 @@ struct gps_dl_reserved_mem_layout {
 };
 
 #endif /* _GPS_DL_LINUX_RESERVED_MEM_H */
+

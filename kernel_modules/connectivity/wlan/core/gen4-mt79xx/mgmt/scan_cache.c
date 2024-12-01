@@ -1,12 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+ * Copyright (c) 2021 MediaTek Inc.
  */
 
 /*******************************************************************************
@@ -64,8 +58,7 @@ static u_int8_t isMediaConnected(struct GL_SCAN_CACHE_INFO *prScanCache);
 static u_int8_t isScanCacheChannels(struct GL_SCAN_CACHE_INFO *prScanCache);
 
 static u_int8_t isScanCacheTimeReady(struct GL_SCAN_CACHE_INFO *prScanCache);
-static u_int8_t isScanCacheLowSpanScan(struct GL_SCAN_CACHE_INFO *prScanCache);
-static u_int8_t isFull2PartialTimeout(struct GL_SCAN_CACHE_INFO *prScanCache);
+
 static u_int8_t isScanCacheTimeOverflow(struct GL_SCAN_CACHE_INFO *prScanCache,
 	OS_SYSTIME rCurrentTime);
 
@@ -131,51 +124,6 @@ static u_int8_t isScanCacheTimeReady(struct GL_SCAN_CACHE_INFO *prScanCache)
 	return prScanCache->u4LastScanTime != 0;
 }
 
-static u_int8_t isScanCacheLowSpanScan(struct GL_SCAN_CACHE_INFO *prScanCache)
-{
-	return (prScanCache->u4Flags & NL80211_SCAN_FLAG_LOW_SPAN) >> 8;
-}
-
-/*
- * @brief This routine is to check the interval of full scan
- *
- * @param prScanCache - pointer of struct GL_SCAN_CACHE_INFO
- *
- * @retval TRUE: time diff between now and last full scan >=
- *		 CFG_SCAN_FULL2PARTIAL_PERIOD
- *         FALSE: time diff between now and last full scan <
- *		 CFG_SCAN_FULL2PARTIAL_PERIOD
- */
-static u_int8_t isFull2PartialTimeout(struct GL_SCAN_CACHE_INFO *prScanCache)
-{
-	struct ADAPTER *prAdapter = NULL;
-	struct SCAN_INFO *prScanInfo;
-	u_int8_t fgLastFullScanTimeout = FALSE;
-	OS_SYSTIME rCurrentTime;
-
-	GET_CURRENT_SYSTIME(&rCurrentTime);
-
-	prAdapter = prScanCache->prGlueInfo->prAdapter;
-	if (prAdapter == NULL) {
-		DBGLOG(REQ, ERROR, "prScanCache->prGlueInfo->prAdapter NULL");
-		return FALSE;
-	}
-
-	prScanInfo = &(prAdapter->rWifiVar.rScanInfo);
-	if (prScanInfo == NULL) {
-		DBGLOG(REQ, ERROR, "prAdapter->rWifiVar.rScanInfo NULL");
-		return FALSE;
-	}
-
-#if CFG_SUPPORT_FULL2PARTIAL_SCAN
-	if (CHECK_FOR_TIMEOUT(rCurrentTime, prScanInfo->u4LastFullScanTime,
-		SEC_TO_SYSTIME(CFG_SCAN_FULL2PARTIAL_PERIOD)))
-		fgLastFullScanTimeout = TRUE;
-#endif
-
-	return fgLastFullScanTimeout;
-}
-
 static u_int8_t isScanCacheTimeOverflow(struct GL_SCAN_CACHE_INFO *prScanCache,
 	OS_SYSTIME rCurrentTime)
 {
@@ -223,19 +171,11 @@ static u_int8_t inScanCachePeriod(struct GL_SCAN_CACHE_INFO *prScanCache,
 static u_int8_t matchScanCache(struct GL_SCAN_CACHE_INFO *prScanCache,
 	OS_SYSTIME rCurrentTime)
 {
+	if (isMediaConnected(prScanCache) == TRUE &&
+		inScanCachePeriod(prScanCache, rCurrentTime) == TRUE &&
+		isScanCacheChannels(prScanCache) == TRUE)
+		return TRUE;
 
-	if (isMediaConnected(prScanCache) == TRUE) {
-		/* If scan not triggered by APP and it has been >
-		 * CFG_SCAN_FULL2PARTIAL_PERIOD for last full scan,
-		 * not to do scan cache
-		*/
-		if (!isScanCacheLowSpanScan(prScanCache) &&
-			isFull2PartialTimeout(prScanCache))
-			return FALSE;
-		else if (inScanCachePeriod(prScanCache, rCurrentTime) == TRUE &&
-				isScanCacheChannels(prScanCache) == TRUE)
-			return TRUE;
-	}
 	return FALSE;
 }
 

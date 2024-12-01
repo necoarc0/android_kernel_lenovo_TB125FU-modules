@@ -1,12 +1,14 @@
-/* SPDX-License-Identifier: GPL-2.0 */  
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2016,2017 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  */
+
 
 #ifndef _BTMTK_SDIO_H_
 #define _BTMTK_SDIO_H_
 /* It's for reset procedure */
 #include <linux/mmc/sdio_ids.h>
+#include <linux/mmc/sdio_func.h>
 #include <linux/module.h>
 
 #include <linux/of_gpio.h>
@@ -19,7 +21,6 @@
 #include "btmtk_main.h"
 #include "btmtk_woble.h"
 #include "btmtk_buffer_mode.h"
-#include "btmtk_chip_reset.h"
 
 #ifndef BTMTK_SDIO_DEBUG
 #define BTMTK_SDIO_DEBUG 0
@@ -28,9 +29,7 @@
 /**
  * Card-relate definition.
  */
-#ifndef SDIO_VENDOR_ID_MEDIATEK
 #define SDIO_VENDOR_ID_MEDIATEK 0x037A
-#endif
 
 #define HCI_HEADER_LEN	4
 
@@ -52,12 +51,8 @@
 #define CRDR		0x001C
 #define CTFSR		0x0020
 #define CRPLR		0x0024
-#define CSICR		0x00C0
 #define PD2HRM0R	0x00DC
 #define SWPCDBGR	0x0154
-#define PH2DSM0R	0x00C4
-/* PH2DSM0R*/
-#define PH2DSM0R_DRIVER_OWN		0x00000001
 /* CHLPCR */
 #define C_FW_INT_EN_SET			0x00000001
 #define C_FW_INT_EN_CLEAR		0x00000002
@@ -107,7 +102,7 @@ typedef int (*set_gpio_high)(u8 gpio);
 /* Driver & FW own related */
 #define DRIVER_OWN 0
 #define FW_OWN 1
-#define SET_OWN_LOOP_COUNT 10
+#define SET_OWN_LOOP_COUNT 20
 
 /* CMD&Event sent by driver */
 #define READ_REGISTER_CMD_LEN		16
@@ -120,21 +115,10 @@ typedef int (*set_gpio_high)(u8 gpio);
 #define READ_ADDRESS_EVT_HDR_LEN 7
 #define READ_ADDRESS_EVT_PAYLOAD_OFFSET 7
 #define WOBLE_DEBUG_EVT_TYPE 0xE8
-#define BLE_EVT_TYPE 0x3E
 
 #define LD_PATCH_CMD_LEN 10
 #define LD_PATCH_EVT_LEN 8
 
-#define BTMTK_SDIO_THREAD_STOP	(1 << 0)
-#define BTMTK_SDIO_THREAD_TX		(1 << 1)
-#define BTMTK_SDIO_THREAD_RX		(1 << 2)
-#define BTMTK_SDIO_THREAD_FW_OWN	(1 << 3)
-
-#define FW_OWN_TIMEOUT		30
-#define FW_OWN_TIMER_INIT	0
-#define FW_OWN_TIMER_RUNNING	1
-
-#define CHECK_THREAD_RETRY_TIMES 50
 
 struct btmtk_sdio_hdr {
 	/* For SDIO Header */
@@ -148,14 +132,12 @@ struct btmtk_sdio_thread {
 	struct task_struct *task;
 	wait_queue_head_t wait_q;
 	void *priv;
-	atomic_t thread_status;
+	u8 thread_status;
 };
 
 struct btmtk_sdio_dev {
 	struct sdio_func *func;
-	struct btmtk_dev *bdev;
 
-	bool patched;
 	bool no_fw_own;
 	atomic_t int_count;
 	atomic_t tx_rdy;
@@ -171,9 +153,6 @@ struct btmtk_sdio_dev {
 	struct btmtk_sdio_thread sdio_thread;
 	struct btmtk_woble bt_woble;
 	struct btmtk_buffer_mode_struct *buffer_mode;
-
-	struct timer_list fw_own_timer;
-	atomic_t fw_own_timer_flag;
 };
 
 int btmtk_sdio_read_bt_mcu_pc(u32 *val);

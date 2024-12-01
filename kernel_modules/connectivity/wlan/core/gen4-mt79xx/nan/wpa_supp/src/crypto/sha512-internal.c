@@ -1,14 +1,6 @@
-/* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
-
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2020 MediaTek Inc.
- */
-/*
- * SHA-512 hash implementation and interface functions
- * Copyright (c) 2015, Pali Rohár <pali.rohar@gmail.com>
- *
- * This software may be distributed under the terms of the BSD license.
- * See README for more details.
+ * Copyright (c) 2021 MediaTek Inc.
  */
 
 #include "wpa_supp/FourWayHandShake.h"
@@ -27,7 +19,7 @@
  */
 int
 sha512_vector(size_t num_elem, const u8 *addr[], const size_t *len, u8 *mac) {
-	struct nan_rdf_sha512_state ctx;
+	struct sha512_state ctx;
 	size_t i;
 
 	sha512_init(&ctx);
@@ -111,7 +103,7 @@ static const u64 K[80] = {
 
 /* compress 1024-bits */
 static int
-sha512_compress(struct nan_rdf_sha512_state *md, unsigned char *buf) {
+sha512_compress(struct sha512_state *md, unsigned char *buf) {
 	u64 S[8], W[80], t0, t1;
 	int i;
 
@@ -156,7 +148,7 @@ sha512_compress(struct nan_rdf_sha512_state *md, unsigned char *buf) {
  *   @return CRYPT_OK if successful
  */
 void
-sha512_init(struct nan_rdf_sha512_state *md) {
+sha512_init(struct sha512_state *md) {
 	md->curlen = 0;
 	md->length = 0;
 	md->state[0] = CONST64(0x6a09e667f3bcc908);
@@ -177,7 +169,7 @@ sha512_init(struct nan_rdf_sha512_state *md) {
  *   @return CRYPT_OK if successful
  */
 int
-sha512_process(struct nan_rdf_sha512_state *md, const unsigned char *in,
+sha512_process(struct sha512_state *md, const unsigned char *in,
 	       unsigned long inlen) {
 	unsigned long n;
 
@@ -216,7 +208,7 @@ sha512_process(struct nan_rdf_sha512_state *md, const unsigned char *in,
  *   @return CRYPT_OK if successful
  */
 int
-sha512_done(struct nan_rdf_sha512_state *md, unsigned char *out) {
+sha512_done(struct sha512_state *md, unsigned char *out) {
 	int i;
 
 	if (md->curlen >= sizeof(md->buf))

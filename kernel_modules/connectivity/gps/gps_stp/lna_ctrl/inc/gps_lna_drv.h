@@ -17,3 +17,4 @@ void gps_lna_pin_ctrl(enum gps_data_link_id_enum link_id, bool dsp_is_on, bool f
 void gps_lna_update_status_for_md_blanking(bool gps_is_on);
 
 #endif /* _GPS_DL_LINUX_PLAT_DRV_H */
+

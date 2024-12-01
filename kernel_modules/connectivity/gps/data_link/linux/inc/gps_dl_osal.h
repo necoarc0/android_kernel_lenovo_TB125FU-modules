@@ -194,3 +194,4 @@ do { \
 } while (0)
 
 #endif /* _GPS_DL_OSAL_H */
+

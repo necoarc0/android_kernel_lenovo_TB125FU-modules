@@ -287,3 +287,4 @@ int coredump_test(int par1, int par2, int par3)
 	return 0;
 #endif
 }
+

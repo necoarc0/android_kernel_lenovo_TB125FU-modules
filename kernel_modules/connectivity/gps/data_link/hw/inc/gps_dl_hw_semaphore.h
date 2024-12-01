@@ -18,3 +18,4 @@ bool gps_dl_hw_take_conn_rfspi_hw_sema(unsigned int timeout_ms);
 void gps_dl_hw_give_conn_rfspi_hw_sema(void);
 
 #endif /* _GPS_DL_HW_SEMAPHORE_H */
+

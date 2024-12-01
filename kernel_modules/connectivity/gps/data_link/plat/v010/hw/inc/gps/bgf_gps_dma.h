@@ -192,3 +192,4 @@
 #define BGF_GPS_DMA_DMA4_PGMADDR_PGMADDR_SHFT                  0
 
 #endif /* __BGF_GPS_DMA_REGS_H__ */
+

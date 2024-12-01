@@ -1,13 +1,10 @@
-/* SPDX-License-Identifier: GPL-2.0 */  
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2016,2017 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  */
 
 #ifndef __BTMTK_FW_LOG_H__
 #define __BTMTK_FW_LOG_H__
-
-#include "btmtk_main.h"
-#include "btmtk_chip_reset.h"
 
 #define BT_FWLOG_IOC_MAGIC          (0xfc)
 #define BT_FWLOG_IOC_ON_OFF      _IOW(BT_FWLOG_IOC_MAGIC, 0, int)
@@ -16,22 +13,11 @@
 #define BT_FWLOG_OFF    0x00
 #define BT_FWLOG_ON     0xFF
 
-#define DRV_RETURN_SPECIFIC_HCE_ONLY	1	/* Currently only allow 0xFC26 */
-#define KPI_WITHOUT_TYPE		0	/* bluetooth kpi */
-
-#ifdef STATIC_REGISTER_FWLOG_NODE
-#define FIXED_STPBT_MAJOR_DEV_ID 111
-#endif
+/* bluetooth kpi */
+#define KPI_WITHOUT_TYPE	0
 
 /* Device node */
-#if CFG_SUPPORT_MULTI_DEV_NODE
-	#define BT_FWLOG_DEV_NODE	"stpbt_multi_fwlog"
-#else
-	#define BT_FWLOG_DEV_NODE	"stpbtfwlog"
-#endif
-
-#define PROC_ROOT_DIR "stpbt"
-#define PROC_BT_CHIP_RESET_COUNT "bt_chip_reset_count"
+#define BT_FWLOG_DEV_NODE	"fw_log_bt"
 
 struct btmtk_fops_fwlog {
 	dev_t g_devIDfwlog;
@@ -42,7 +28,6 @@ struct btmtk_fops_fwlog {
 	struct device *pBTDevfwlog;
 	spinlock_t fwlog_lock;
 	u8 btmtk_bluetooth_kpi;
-	struct sk_buff_head usr_opcode_queue;
 };
 
 int btmtk_fops_initfwlog(void);

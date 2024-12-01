@@ -163,3 +163,4 @@ void gps_dl_hw_set_pta_blanking_parameter(bool use_direct_path);
 unsigned int gps_dl_hw_get_mcub_a2d1_cfg(enum gps_dl_link_id_enum link_id, bool is_1byte_mode);
 
 #endif /* _GPS_DL_HW_API_H */
+

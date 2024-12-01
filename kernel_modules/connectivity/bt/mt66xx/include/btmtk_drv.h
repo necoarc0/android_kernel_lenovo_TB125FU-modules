@@ -1,7 +1,8 @@
-/* SPDX-License-Identifier: GPL-2.0 */  
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2016,2017 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  */
+
 
 #ifndef _BTMTK_DRV_H_
 #define _BTMTK_DRV_H_
@@ -136,9 +137,13 @@ struct ring_buffer {
 
 #ifdef CONFIG_DEBUG_FS
 
+#define FIXED_STPBT_MAJOR_DEV_ID 111
+
+
 
 #define FW_DUMP_END_EVENT "coredump end"
 
 #endif
 
 #endif
+

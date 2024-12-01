@@ -66,3 +66,4 @@ void gps_dl_device_context_init(void);
 void gps_dl_device_context_deinit(void);
 
 #endif /* _GPS_EACH_DEVICE_H */
+

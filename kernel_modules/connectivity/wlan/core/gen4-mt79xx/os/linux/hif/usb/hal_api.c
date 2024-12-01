@@ -1,54 +1,7 @@
-/******************************************************************************
- *
- * This file is provided under a dual license.  When you use or
- * distribute this software, you may choose to be licensed under
- * version 2 of the GNU General Public License ("GPLv2 License")
- * or BSD License.
- *
- * GPLv2 License
- *
- * Copyright(C) 2016 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * BSD LICENSE
- *
- * Copyright(C) 2016 MediaTek Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2016 MediaTek Inc.
+ */
 /******************************************************************************
 *[File]             hif_api.c
 *[Version]          v1.0
@@ -80,6 +33,7 @@
 #endif
 
 #include "mt66xx_reg.h"
+#include "hal_wfsys_reset_mt7961.h"
 
 /*******************************************************************************
 *                              C O N S T A N T S
@@ -148,7 +102,10 @@ u_int8_t halVerifyChipID(IN struct ADAPTER *prAdapter)
 	uint32_t u4CIR = 0;
 	struct mt66xx_chip_info *prChipInfo;
 
-	ASSERT(prAdapter);
+	if (prAdapter == NULL) {
+		DBGLOG(HAL, ERROR, "prAdapter is NULL error\n");
+		return FALSE;
+	}
 
 	if (prAdapter->fgIsReadRevID)
 		return TRUE;
@@ -170,12 +127,10 @@ u_int8_t halVerifyChipID(IN struct ADAPTER *prAdapter)
 }
 
 uint32_t
-halRxWaitResponse(IN struct ADAPTER *prAdapter,
-		  IN uint8_t ucPortIdx, OUT uint8_t *pucRspBuffer,
-		  IN uint32_t u4MaxRespBufferLen, OUT uint32_t *pu4Length,
-		  IN uint32_t u4WaitingInterval, IN uint32_t u4TimeoutValue)
+halRxWaitResponse(IN struct ADAPTER *prAdapter, IN uint8_t ucPortIdx, OUT uint8_t *pucRspBuffer,
+		  IN uint32_t u4MaxRespBufferLen, OUT uint32_t *pu4Length)
 {
-	struct GL_HIF_INFO *prHifInfo = &prAdapter->prGlueInfo->rHifInfo;
+	struct GL_HIF_INFO *prHifInfo;
 	uint32_t u4Status = WLAN_STATUS_SUCCESS;
 	struct RX_CTRL *prRxCtrl;
 	u_int8_t ret = FALSE;
@@ -183,9 +138,16 @@ halRxWaitResponse(IN struct ADAPTER *prAdapter,
 
 	DEBUGFUNC("halRxWaitResponse");
 
-	ASSERT(prAdapter);
-	ASSERT(pucRspBuffer);
+	if (prAdapter == NULL) {
+		DBGLOG(HAL, ERROR, "prAdapter is NULL error\n");
+		return WLAN_STATUS_FAILURE;
+	}
+	if (pucRspBuffer == NULL) {
+		DBGLOG(HAL, ERROR, "pucRspBuffer is NULL error\n");
+		return WLAN_STATUS_FAILURE;
+	}
 
+	prHifInfo = &prAdapter->prGlueInfo->rHifInfo;
 	prRxCtrl = &prAdapter->rRxCtrl;
 	prBusInfo = prAdapter->chip_info->bus_info;
 
@@ -262,29 +224,38 @@ uint32_t halTxUSBSendCmd(IN struct GLUE_INFO *prGlueInfo, IN uint8_t ucTc, IN st
 
 	if (!(prHifInfo->state == USB_STATE_LINK_UP ||
 		prHifInfo->state == USB_STATE_PRE_RESUME ||
-		prHifInfo->state == USB_STATE_PRE_SUSPEND_START ||
-		prHifInfo->state == USB_STATE_READY))
+		prHifInfo->state == USB_STATE_PRE_SUSPEND)) {
+		DBGLOG(HAL, ERROR, "TX CMD CID[0x%X] invalid state %d!\n",
+		       prCmdInfo->ucCID, prHifInfo->state);
 		return WLAN_STATUS_FAILURE;
+	}
 
 	prUsbReq = glUsbDequeueReq(prHifInfo, &prHifInfo->rTxCmdFreeQ, &prHifInfo->rTxCmdQLock);
-	if (prUsbReq == NULL)
+	if (prUsbReq == NULL) {
+		DBGLOG(HAL, ERROR, "TX CMD CID[0x%X] SEQ[%d] no URB!\n",
+		       prCmdInfo->ucCID, prCmdInfo->ucCmdSeqNum);
 		return WLAN_STATUS_RESOURCES;
+	}
 
 	prBufCtrl = prUsbReq->prBufCtrl;
 
 	if ((TFCB_FRAME_PAD_TO_DW(prCmdInfo->u4TxdLen + prCmdInfo->u4TxpLen) + LEN_USB_UDMA_TX_TERMINATOR) >
 	    prBufCtrl->u4BufSize) {
-		DBGLOG(HAL, ERROR, "Command TX buffer underflow!\n");
+		DBGLOG(HAL, ERROR, "TX CMD CID[0x%X] buffer underflow!\n",
+		       prCmdInfo->ucCID);
 		glUsbEnqueueReq(prHifInfo, &prHifInfo->rTxCmdFreeQ, prUsbReq,
 				&prHifInfo->rTxCmdQLock, FALSE);
 		return WLAN_STATUS_RESOURCES;
 	}
 
-	DBGLOG(HAL, INFO, "TX URB[0x%p]\n", prUsbReq->prUrb);
+	DBGLOG(HAL, INFO, "TX CMD CID[0x%X] URB[0x%p] SEQ[%d]\n", prCmdInfo->ucCID,
+	       prUsbReq->prUrb, prCmdInfo->ucCmdSeqNum);
 
 	prChipInfo = prGlueInfo->prAdapter->chip_info;
 	prTxDescOps = prChipInfo->prTxDescOps;
-	HAL_WRITE_HIF_TXD(prChipInfo, prBufCtrl->pucBuf, (prCmdInfo->u4TxdLen + prCmdInfo->u4TxpLen));
+	HAL_WRITE_HIF_TXD(prChipInfo, prBufCtrl->pucBuf,
+			(prCmdInfo->u4TxdLen + prCmdInfo->u4TxpLen),
+				TXD_PKT_FORMAT_COMMAND);
 	u2OverallBufferLength += prChipInfo->u2HifTxdSize;
 
 	if (prCmdInfo->u4TxdLen) {
@@ -388,7 +359,14 @@ void halTxUSBProcessCmdComplete(IN struct ADAPTER *prAdapter, struct USB_REQ *pr
 	glUsbEnqueueReq(prHifInfo, &prHifInfo->rTxCmdFreeQ, prUsbReq, &prHifInfo->rTxCmdQLock, FALSE);
 
 	u4SentDataSize = urb->actual_length - LEN_USB_UDMA_TX_TERMINATOR;
-	nicTxReleaseResource_PSE(prAdapter, TC4_INDEX, nicTxGetPageCount(prAdapter, u4SentDataSize, TRUE), TRUE);
+	nicTxReleaseResource_PSE(prAdapter, TC4_INDEX,
+		halTxGetCmdPageCount(prAdapter, u4SentDataSize, TRUE), TRUE);
+
+#if CFG_SUPPORT_MULTITHREAD
+	/* TX Commands */
+	if (kalGetTxPendingCmdCount(prAdapter->prGlueInfo))
+		kalSetTxCmdEvent2Hif(prAdapter->prGlueInfo);
+#endif
 }
 
 void halTxCancelSendingCmd(IN struct ADAPTER *prAdapter, IN struct CMD_INFO *prCmdInfo)
@@ -423,7 +401,11 @@ void halTxCancelAllSending(IN struct ADAPTER *prAdapter)
 	uint8_t ucTc;
 #endif
 
-	ASSERT(prAdapter);
+	if (prAdapter == NULL) {
+		DBGLOG(HAL, ERROR, "prAdapter is NULL error\n");
+		return;
+	}
+
 	prGlueInfo = prAdapter->prGlueInfo;
 	prHifInfo = &prGlueInfo->rHifInfo;
 
@@ -439,6 +421,64 @@ void halTxCancelAllSending(IN struct ADAPTER *prAdapter)
 #endif
 }
 
+void halCancelTxRx(IN struct ADAPTER *prAdapter)
+{
+	/* stop TX BULK OUT URB */
+	halTxCancelAllSending(prAdapter);
+
+	/* stop RX BULK IN URB */
+	halDisableInterrupt(prAdapter);
+}
+
+#if CFG_CHIP_RESET_SUPPORT
+uint32_t halToggleWfsysRst(IN struct ADAPTER *prAdapter)
+{
+	struct mt66xx_chip_info *prChipInfo;
+	struct BUS_INFO *prBusInfo;
+	struct CHIP_DBG_OPS *prChipDbg;
+
+	prChipInfo = prAdapter->chip_info;
+	prBusInfo = prChipInfo->bus_info;
+	prChipDbg = prChipInfo->prDebugOps;
+
+	/* Although we've already executed show_mcu_debug_info() in
+	 * glResetTriggerCommon(), it may not be a successful operation at that
+	 * time in USB mode due to the context is soft_irq which forbids the
+	 * execution of usb_control_msg(). Since we don't prefer to refactor it
+	 * at this stage, this is a workaround by performing it again here
+	 * where the context is kernel thread from workqueue.
+	 */
+	if (prChipDbg->show_mcu_debug_info)
+		prChipDbg->show_mcu_debug_info(prAdapter, NULL, 0,
+					       DBG_MCU_DBG_ALL, NULL);
+
+	/* set USB EP_RST_OPT as reset scope excludes toggle bit,
+	 * sequence number, etc.
+	 */
+	if (prBusInfo->asicUsbEpctlRstOpt)
+		prBusInfo->asicUsbEpctlRstOpt(prAdapter, FALSE);
+
+	/* assert WF L0.5 reset */
+	if (prChipInfo->asicWfsysRst)
+		prChipInfo->asicWfsysRst(prAdapter, TRUE);
+
+	/* wait 2 ticks of 32K */
+	kalUdelay(64);
+
+	/* de-assert WF L0.5 reset */
+	if (prChipInfo->asicWfsysRst)
+		prChipInfo->asicWfsysRst(prAdapter, FALSE);
+
+	if (prChipInfo->asicPollWfsysSwInitDone)
+		if (!prChipInfo->asicPollWfsysSwInitDone(prAdapter)) {
+			DBGLOG(HAL, ERROR, "L0.5 reset polling sw init done fail\n");
+			return WLAN_STATUS_FAILURE;
+		}
+
+	return WLAN_STATUS_SUCCESS;
+}
+#endif /* CFG_CHIP_RESET_SUPPORT */
+
 #if CFG_USB_TX_AGG
 uint32_t halTxUSBSendAggData(IN struct GL_HIF_INFO *prHifInfo, IN uint8_t ucTc, IN struct USB_REQ *prUsbReq)
 {
@@ -450,8 +490,7 @@ uint32_t halTxUSBSendAggData(IN struct GL_HIF_INFO *prHifInfo, IN uint8_t ucTc, 
 	memset(prBufCtrl->pucBuf + prBufCtrl->u4WrIdx, 0, LEN_USB_UDMA_TX_TERMINATOR);
 	prBufCtrl->u4WrIdx += LEN_USB_UDMA_TX_TERMINATOR;
 
-	if (!(prHifInfo->state == USB_STATE_LINK_UP ||
-		prHifInfo->state == USB_STATE_READY)) {
+	if (prHifInfo->state != USB_STATE_LINK_UP) {
 		/* No need to dequeue prUsbReq because LINK is not up */
 		prBufCtrl->u4WrIdx = 0;
 		return WLAN_STATUS_FAILURE;
@@ -566,7 +605,8 @@ uint32_t halTxUSBSendData(IN struct GLUE_INFO *prGlueInfo, IN struct MSDU_INFO *
 		prBufCtrl = prUsbReq->prBufCtrl;
 	}
 
-	HAL_WRITE_HIF_TXD(prChipInfo, prBufCtrl->pucBuf + prBufCtrl->u4WrIdx, u4Length);
+	HAL_WRITE_HIF_TXD(prChipInfo, prBufCtrl->pucBuf + prBufCtrl->u4WrIdx,
+				u4Length, TXD_PKT_FORMAT_TXD_PAYLOAD);
 	prBufCtrl->u4WrIdx += prChipInfo->u2HifTxdSize;
 	memcpy(prBufCtrl->pucBuf + prBufCtrl->u4WrIdx, pucBuf, u4Length);
 	prBufCtrl->u4WrIdx += u4Length;
@@ -596,7 +636,8 @@ uint32_t halTxUSBSendData(IN struct GLUE_INFO *prGlueInfo, IN struct MSDU_INFO *
 	prBufCtrl = prUsbReq->prBufCtrl;
 	prBufCtrl->u4WrIdx = 0;
 
-	HAL_WRITE_HIF_TXD(prChipInfo, prBufCtrl->pucBuf, u4Length);
+	HAL_WRITE_HIF_TXD(prChipInfo, prBufCtrl->pucBuf, u4Length,
+			TXD_PKT_FORMAT_TXD_PAYLOAD);
 	prBufCtrl->u4WrIdx += prChipInfo->u2HifTxdSize;
 
 	memcpy(prBufCtrl->pucBuf + prChipInfo->u2HifTxdSize, pucBuf, u4Length);
@@ -710,7 +751,8 @@ void halTxUSBProcessMsduDone(IN struct GLUE_INFO *prGlueInfo, struct USB_REQ *pr
 
 	u4SentDataSize = urb->actual_length - LEN_USB_UDMA_TX_TERMINATOR;
 	nicTxReleaseResource_PSE(prGlueInfo->prAdapter, ucTc,
-		nicTxGetPageCount(prGlueInfo->prAdapter, u4SentDataSize, TRUE), TRUE);
+		halTxGetDataPageCount(prGlueInfo->prAdapter, u4SentDataSize,
+			TRUE), TRUE);
 }
 
 void halTxUSBProcessDataComplete(IN struct ADAPTER *prAdapter, struct USB_REQ *prUsbReq)
@@ -758,7 +800,9 @@ void halTxUSBProcessDataComplete(IN struct ADAPTER *prAdapter, struct USB_REQ *p
 	if (!HAL_IS_TX_DIRECT(prAdapter)) {
 		if (kalGetTxPendingCmdCount(prAdapter->prGlueInfo) > 0 || wlanGetTxPendingFrameCount(prAdapter) > 0)
 			kalSetEvent(prAdapter->prGlueInfo);
+#if CFG_SUPPORT_MULTITHREAD
 		kalSetTxEvent2Hif(prAdapter->prGlueInfo);
+#endif
 	}
 }
 
@@ -769,9 +813,9 @@ uint32_t halRxUSBEnqueueRFB(
 	IN uint32_t u4MinRfbCnt,
 	IN struct list_head *prCompleteQ)
 {
-	struct GLUE_INFO *prGlueInfo = prAdapter->prGlueInfo;
+	struct GLUE_INFO *prGlueInfo;
 	struct mt66xx_chip_info *prChipInfo;
-	struct RX_CTRL *prRxCtrl = &prAdapter->rRxCtrl;
+	struct RX_CTRL *prRxCtrl;
 	struct SW_RFB *prSwRfb = (struct SW_RFB *) NULL;
 	void *prRxStatus;
 	uint32_t u4RemainCount;
@@ -786,12 +830,23 @@ uint32_t halRxUSBEnqueueRFB(
 
 	KAL_SPIN_LOCK_DECLARATION();
 
-	ASSERT(prAdapter);
+	if (prAdapter == NULL) {
+		DBGLOG(HAL, ERROR, "prAdapter is NULL error\n");
+		return 0;
+	}
+	prGlueInfo = prAdapter->prGlueInfo;
+	prRxCtrl = &prAdapter->rRxCtrl;
 	prChipInfo = prAdapter->chip_info;
 	prBusInfo = prChipInfo->bus_info;
 	prRxDescOps = prChipInfo->prRxDescOps;
-	ASSERT(prRxDescOps->nic_rxd_get_rx_byte_count);
-	ASSERT(prRxDescOps->nic_rxd_get_pkt_type);
+	if (prRxDescOps->nic_rxd_get_rx_byte_count == NULL) {
+		DBGLOG(HAL, ERROR, "nic_rxd_get_rx_byte_count is NULL error\n");
+		return 0;
+	}
+	if (prRxDescOps->nic_rxd_get_pkt_type == NULL) {
+		DBGLOG(HAL, ERROR, "nic_rxd_get_pkt_type is NULL error\n");
+		return 0;
+	}
 
 	pucRxFrame = pucBuf;
 	u4RemainCount = u4Length;
@@ -842,7 +897,7 @@ uint32_t halRxUSBEnqueueRFB(
 				case RX_PKT_TYPE_RX_DATA:
 					spin_lock_bh(&prGlueInfo->rSpinLock[SPIN_LOCK_RX_DIRECT]);
 					nicRxProcessDataPacket(
-							prAdapter, prSwRfb);
+						prAdapter, prSwRfb);
 					spin_unlock_bh(&prGlueInfo->rSpinLock[SPIN_LOCK_RX_DIRECT]);
 					break;
 				default:
@@ -875,7 +930,6 @@ uint32_t halRxUSBEnqueueRFB(
 		set_bit(GLUE_FLAG_RX_BIT, &(prGlueInfo->ulFlag));
 		wake_up_interruptible(&(prGlueInfo->waitq));
 	}
-
 	return u4Length;
 }
 
@@ -938,15 +992,14 @@ void halRxUSBReceiveEventComplete(struct urb *urb)
 	struct GLUE_INFO *prGlueInfo = prHifInfo->prGlueInfo;
 
 	if (!(prHifInfo->state == USB_STATE_LINK_UP ||
-			prHifInfo->state == USB_STATE_READY ||
 			prHifInfo->state == USB_STATE_PRE_RESUME ||
-			prHifInfo->state == USB_STATE_PRE_SUSPEND_START)) {
+			prHifInfo->state == USB_STATE_PRE_SUSPEND)) {
 		glUsbEnqueueReq(prHifInfo, &prHifInfo->rRxEventFreeQ, prUsbReq, &prHifInfo->rRxEventQLock, FALSE);
 		return;
 	}
 
 	/* Hif power off wifi, drop rx packets and continue polling RX packets until RX path empty */
-	if (test_bit(GLUE_FLAG_HALT_BIT, &prGlueInfo->ulFlag)) {
+	if (prGlueInfo->ulFlag & GLUE_FLAG_HALT) {
 		glUsbEnqueueReq(prHifInfo, &prHifInfo->rRxEventFreeQ, prUsbReq, &prHifInfo->rRxEventQLock, FALSE);
 		halRxUSBReceiveEvent(prGlueInfo->prAdapter, FALSE);
 		return;
@@ -979,13 +1032,106 @@ void halRxUSBReceiveEventComplete(struct urb *urb)
 #endif
 }
 
-uint32_t halRxUSBReceiveData(IN struct ADAPTER *prAdapter)
+#if CFG_CHIP_RESET_SUPPORT
+uint32_t halRxUSBReceiveWdt(IN struct ADAPTER *prAdapter)
 {
 	struct GLUE_INFO *prGlueInfo = prAdapter->prGlueInfo;
 	struct GL_HIF_INFO *prHifInfo = &prGlueInfo->rHifInfo;
 	struct USB_REQ *prUsbReq;
 	uint32_t u4Status = WLAN_STATUS_SUCCESS;
 	int ret;
+
+	while (1) {
+		prUsbReq = glUsbDequeueReq(prHifInfo, &prHifInfo->rRxWdtFreeQ,
+					   &prHifInfo->rRxWdtQLock);
+		if (prUsbReq == NULL)
+			return WLAN_STATUS_RESOURCES;
+
+		usb_anchor_urb(prUsbReq->prUrb, &prHifInfo->rRxWdtAnchor);
+
+		prUsbReq->prBufCtrl->u4ReadSize = 0;
+
+		usb_fill_int_urb(prUsbReq->prUrb,
+				 prHifInfo->udev,
+				 usb_rcvintpipe(prHifInfo->udev,
+						USB_WDT_EP_IN),
+				 (void *)prUsbReq->prBufCtrl->pucBuf,
+				 prUsbReq->prBufCtrl->u4BufSize,
+				 halRxUSBReceiveWdtComplete,
+				 (void *)prUsbReq,
+				 1);
+
+		ret = glUsbSubmitUrb(prHifInfo, prUsbReq->prUrb,
+				     SUBMIT_TYPE_RX_WDT);
+		if (ret) {
+			DBGLOG(HAL, ERROR,
+			       "glUsbSubmitUrb() reports error (%d)\n", ret);
+
+			usb_unanchor_urb(prUsbReq->prUrb);
+			glUsbEnqueueReq(prHifInfo, &prHifInfo->rRxWdtFreeQ,
+					prUsbReq, &prHifInfo->rRxWdtQLock,
+					FALSE);
+			break;
+		}
+	}
+
+	return u4Status;
+}
+
+void halRxUSBReceiveWdtComplete(struct urb *urb)
+{
+	struct USB_REQ *prUsbReq = urb->context;
+	struct GL_HIF_INFO *prHifInfo = prUsbReq->prHifInfo;
+	struct GLUE_INFO *prGlueInfo = prHifInfo->prGlueInfo;
+	struct mt66xx_chip_info *prChipInfo;
+	struct BUS_INFO *prBusInfo;
+
+	prChipInfo = prGlueInfo->prAdapter->chip_info;
+	prBusInfo = prChipInfo->bus_info;
+
+	if (urb->status == -ESHUTDOWN || urb->status == -ENOENT) {
+		glUsbEnqueueReq(prHifInfo, &prHifInfo->rRxWdtFreeQ, prUsbReq,
+				&prHifInfo->rRxWdtQLock, FALSE);
+		DBGLOG(RX, ERROR, "USB device shutdown skip Rx\n");
+		return;
+	}
+
+	if (urb->status == 0) {
+		glUsbEnqueueReq(prHifInfo, &prHifInfo->rRxWdtCompleteQ,
+				prUsbReq, &prHifInfo->rRxWdtQLock, FALSE);
+
+		/*tasklet_hi_schedule(&prGlueInfo->rRxTask);*/
+		tasklet_schedule(&prGlueInfo->rRxTask);
+	} else {
+		DBGLOG(RX, ERROR, "receive WDT fail (status = %d)\n",
+		       urb->status);
+		glUsbEnqueueReq(prHifInfo, &prHifInfo->rRxWdtFreeQ, prUsbReq,
+				&prHifInfo->rRxWdtQLock, FALSE);
+
+		halRxUSBReceiveWdt(prGlueInfo->prAdapter);
+	}
+}
+#endif /* CFG_CHIP_RESET_SUPPORT */
+
+uint32_t halRxUSBReceiveData(IN struct ADAPTER *prAdapter)
+{
+	struct GLUE_INFO *prGlueInfo;
+	struct GL_HIF_INFO *prHifInfo;
+	struct USB_REQ *prUsbReq;
+	uint32_t u4Status = WLAN_STATUS_SUCCESS;
+	int ret;
+
+	if (!prAdapter) {
+		DBGLOG(INIT, WARN, "Adapter NULL\n");
+		return WLAN_STATUS_FAILURE;
+	}
+	prGlueInfo = prAdapter->prGlueInfo;
+
+	if (!prGlueInfo) {
+		DBGLOG(INIT, WARN, "GlueInfo NULL\n");
+		return WLAN_STATUS_FAILURE;
+	}
+	prHifInfo = &prGlueInfo->rHifInfo;
 
 	while (1) {
 		prUsbReq = glUsbDequeueReq(prHifInfo, &prHifInfo->rRxDataFreeQ, &prHifInfo->rRxDataQLock);
@@ -1022,13 +1168,14 @@ void halRxUSBReceiveDataComplete(struct urb *urb)
 	struct GLUE_INFO *prGlueInfo = prHifInfo->prGlueInfo;
 
 	if (!(prHifInfo->state == USB_STATE_LINK_UP ||
-			prHifInfo->state == USB_STATE_READY)) {
+			prHifInfo->state == USB_STATE_PRE_RESUME ||
+			prHifInfo->state == USB_STATE_PRE_SUSPEND)) {
 		glUsbEnqueueReq(prHifInfo, &prHifInfo->rRxDataFreeQ, prUsbReq, &prHifInfo->rRxDataQLock, FALSE);
 		return;
 	}
 
 	/* Hif power off wifi, drop rx packets and continue polling RX packets until RX path empty */
-	if (test_bit(GLUE_FLAG_HALT_BIT, &prGlueInfo->ulFlag)) {
+	if (prGlueInfo->ulFlag & GLUE_FLAG_HALT) {
 		glUsbEnqueueReq(prHifInfo, &prHifInfo->rRxDataFreeQ, prUsbReq, &prHifInfo->rRxDataQLock, FALSE);
 		halRxUSBReceiveData(prGlueInfo->prAdapter);
 		return;
@@ -1098,6 +1245,33 @@ void halRxUSBProcessEventDataComplete(IN struct ADAPTER *prAdapter,
 			continue;
 		}
 
+#if CFG_CHIP_RESET_SUPPORT
+		if (prAdapter->chip_info->fgIsSupportL0p5Reset) {
+			spin_lock_bh(&prAdapter->rWfsysResetLock);
+			/* During WFSYS_RESET_STATE_REINIT,
+			* driver might need to receive
+			* events like response
+			* of EXT_CMD_ID_EFUSE_BUFFER_MODE.
+			*/
+			if ((prAdapter->eWfsysResetState
+				!= WFSYS_RESET_STATE_IDLE) &&
+			    (prAdapter->eWfsysResetState
+				!= WFSYS_RESET_STATE_REINIT)) {
+				spin_unlock_bh(&prAdapter->rWfsysResetLock);
+
+				DBGLOG(RX, ERROR,
+					"skip rx urb process due to L0.5 reset\n");
+
+				glUsbEnqueueReq(prHifInfo, prFreeQ,
+					prUsbReq, prLock, FALSE);
+				prUsbReq = glUsbDequeueReq(prHifInfo,
+					prCompleteQ, prLock);
+				continue;
+			}
+			spin_unlock_bh(&prAdapter->rWfsysResetLock);
+		}
+#endif /* CFG_CHIP_RESET_SUPPORT */
+
 		pucBufAddr = prBufCtrl->pucBuf + prBufCtrl->u4ReadSize;
 		u4BufLen = prUrb->actual_length - prBufCtrl->u4ReadSize;
 
@@ -1134,6 +1308,77 @@ void halRxUSBProcessEventDataComplete(IN struct ADAPTER *prAdapter,
 	}
 }
 
+#if CFG_CHIP_RESET_SUPPORT
+void halRxUSBProcessWdtComplete(IN struct ADAPTER *prAdapter,
+				struct list_head *prCompleteQ,
+				struct list_head *prFreeQ, uint32_t u4MinRfbCnt)
+{
+	struct USB_REQ *prUsbReq;
+	struct urb *prUrb;
+	struct BUF_CTRL *prBufCtrl;
+	struct GLUE_INFO *prGlueInfo = prAdapter->prGlueInfo;
+	struct GL_HIF_INFO *prHifInfo = &prGlueInfo->rHifInfo;
+	spinlock_t *prLock = &prHifInfo->rRxWdtQLock;
+	uint8_t *pucBufAddr;
+	uint32_t u4BufLen;
+
+#define USB_WATCHDOG_TIMEOUT_EVENT        0xFF
+
+	/* Process complete WDT interrupt */
+	prUsbReq = glUsbDequeueReq(prHifInfo, prCompleteQ, prLock);
+	while (prUsbReq) {
+		prUrb = prUsbReq->prUrb;
+		prBufCtrl = prUsbReq->prBufCtrl;
+
+		DBGLOG(RX, LOUD, "Rx URB[0x%p] Len[%u] Sts[%u]\n",
+			prUrb, prUrb->actual_length, prUrb->status);
+
+		if (prUrb->status != 0) {
+			DBGLOG(RX, ERROR, "receive WDT fail (status = %d)\n",
+			       prUrb->status);
+
+			glUsbEnqueueReq(prHifInfo, prFreeQ, prUsbReq, prLock,
+					FALSE);
+			prUsbReq = glUsbDequeueReq(prHifInfo, prCompleteQ,
+						prLock);
+			continue;
+		}
+
+#if CFG_CHIP_RESET_SUPPORT
+		spin_lock_bh(&prAdapter->rWfsysResetLock);
+		if (prAdapter->eWfsysResetState != WFSYS_RESET_STATE_IDLE) {
+			spin_unlock_bh(&prAdapter->rWfsysResetLock);
+
+			DBGLOG(RX, ERROR,
+			       "skip rx urb process due to L0.5 reset\n");
+
+			glUsbEnqueueReq(prHifInfo, prFreeQ, prUsbReq, prLock,
+					FALSE);
+			prUsbReq = glUsbDequeueReq(prHifInfo, prCompleteQ,
+						prLock);
+			continue;
+		}
+		spin_unlock_bh(&prAdapter->rWfsysResetLock);
+#endif /* CFG_CHIP_RESET_SUPPORT */
+
+		pucBufAddr = prBufCtrl->pucBuf + prBufCtrl->u4ReadSize;
+		u4BufLen = prUrb->actual_length - prBufCtrl->u4ReadSize;
+
+		if (u4BufLen == 1 &&
+		    pucBufAddr[0] == USB_WATCHDOG_TIMEOUT_EVENT) {
+			GL_DEFAULT_RESET_TRIGGER(prAdapter, RST_WDT);
+		} else {
+			DBGLOG(RX, ERROR, "receive unexpected WDT packet\n");
+			dumpMemory8(pucBufAddr, u4BufLen);
+			WARN_ON(1);
+		}
+
+		glUsbEnqueueReq(prHifInfo, prFreeQ, prUsbReq, prLock, FALSE);
+		prUsbReq = glUsbDequeueReq(prHifInfo, prCompleteQ, prLock);
+	}
+}
+#endif /* CFG_CHIP_RESET_SUPPORT */
+
 /*----------------------------------------------------------------------------*/
 /*!
 * @brief enable global interrupt
@@ -1148,7 +1393,10 @@ void halEnableInterrupt(IN struct ADAPTER *prAdapter)
 	struct GLUE_INFO *prGlueInfo;
 	struct GL_HIF_INFO *prHifInfo;
 
-	ASSERT(prAdapter);
+	if (prAdapter == NULL) {
+		DBGLOG(HAL, ERROR, "prAdapter is NULL error\n");
+		return;
+	}
 
 	prGlueInfo = prAdapter->prGlueInfo;
 	prHifInfo = &prGlueInfo->rHifInfo;
@@ -1156,6 +1404,12 @@ void halEnableInterrupt(IN struct ADAPTER *prAdapter)
 	halRxUSBReceiveData(prAdapter);
 	if (prHifInfo->eEventEpType != EVENT_EP_TYPE_DATA_EP)
 		halRxUSBReceiveEvent(prAdapter, TRUE);
+
+#if CFG_CHIP_RESET_SUPPORT
+	if (prAdapter->chip_info->fgIsSupportL0p5Reset &&
+	    prAdapter->chip_info->bus_info->fgIsSupportWdtEp)
+		halRxUSBReceiveWdt(prAdapter);
+#endif
 
 	glUdmaRxAggEnable(prGlueInfo, TRUE);
 } /* end of halEnableInterrupt() */
@@ -1174,14 +1428,23 @@ void halDisableInterrupt(IN struct ADAPTER *prAdapter)
 	struct GLUE_INFO *prGlueInfo;
 	struct GL_HIF_INFO *prHifInfo;
 
-	ASSERT(prAdapter);
+	if (prAdapter == NULL) {
+		DBGLOG(HAL, ERROR, "prAdapter is NULL error\n");
+		return;
+	}
 	prGlueInfo = prAdapter->prGlueInfo;
 	prHifInfo = &prGlueInfo->rHifInfo;
 
 	usb_kill_anchored_urbs(&prHifInfo->rRxDataAnchor);
 	usb_kill_anchored_urbs(&prHifInfo->rRxEventAnchor);
+#if CFG_CHIP_RESET_SUPPORT
+	if (prAdapter->chip_info->fgIsSupportL0p5Reset &&
+	    prAdapter->chip_info->bus_info->fgIsSupportWdtEp)
+		usb_kill_anchored_urbs(&prHifInfo->rRxWdtAnchor);
+#endif
 
-	glUdmaRxAggEnable(prGlueInfo, FALSE);
+	if (!wlanIsChipNoAck(prAdapter))
+		glUdmaRxAggEnable(prGlueInfo, FALSE);
 	prAdapter->fgIsIntEnable = FALSE;
 }
 
@@ -1214,13 +1477,20 @@ void halSetFWOwn(IN struct ADAPTER *prAdapter, IN u_int8_t fgEnableGlobalInt)
 
 void halWakeUpWiFi(IN struct ADAPTER *prAdapter)
 {
-	u_int8_t fgResult;
+	struct GL_HIF_INFO *prHifInfo;
+	u_int8_t fgResult = FALSE;
 	uint8_t ucCount = 0;
 
 	DBGLOG(INIT, INFO, "Power on Wi-Fi....\n");
 
-	HAL_WIFI_FUNC_READY_CHECK(prAdapter, WIFI_FUNC_INIT_DONE, &fgResult);
+	prHifInfo = &prAdapter->prGlueInfo->rHifInfo;
 
+	/* Remove check, because just check fw is dl state or not,
+	*  but fw change to dl state is not only by wakeup cmd, and
+	*  fw new cal flow need driver to notice fw wifi driver is
+	*  insert, so it need issue this cmd always when wifi is
+	*  insert.
+	*/
 	while (!fgResult) {
 		HAL_WIFI_FUNC_POWER_ON(prAdapter);
 		kalMdelay(50);
@@ -1234,6 +1504,10 @@ void halWakeUpWiFi(IN struct ADAPTER *prAdapter)
 		}
 	}
 
+	if (prHifInfo->state == USB_STATE_WIFI_OFF && fgResult)
+		glUsbSetState(prHifInfo,
+			USB_STATE_LINK_UP);
+
 	prAdapter->fgIsFwOwn = FALSE;
 }
 
@@ -1242,7 +1516,10 @@ void halEnableFWDownload(IN struct ADAPTER *prAdapter, IN u_int8_t fgEnable)
 #if (CFG_UMAC_GENERATION >= 0x20)
 	struct mt66xx_chip_info *prChipInfo;
 
-	ASSERT(prAdapter);
+	if (prAdapter == NULL) {
+		DBGLOG(HAL, ERROR, "prAdapter is NULL error\n");
+		return;
+	}
 
 	prChipInfo = prAdapter->chip_info;
 	if (prChipInfo->asicEnableFWDownload) {
@@ -1266,16 +1543,36 @@ void halDevInit(IN struct ADAPTER *prAdapter)
 {
 	struct GLUE_INFO *prGlueInfo;
 
-	ASSERT(prAdapter);
+	if (prAdapter == NULL) {
+		DBGLOG(HAL, ERROR, "prAdapter is NULL error\n");
+		return;
+	}
 	prGlueInfo = prAdapter->prGlueInfo;
 
 	glUdmaRxAggEnable(prGlueInfo, FALSE);
 	glUdmaTxRxEnable(prGlueInfo, TRUE);
 }
 
-u_int8_t halTxIsCmdBufEnough(IN struct ADAPTER *prAdapter)
+u_int32_t halTxGetFreeCmdCnt(IN struct ADAPTER *prAdapter)
 {
-	return TRUE;
+	struct GLUE_INFO *prGlueInfo;
+	struct GL_HIF_INFO *prHifInfo;
+	struct USB_REQ *prUsbReq, *prNext;
+	unsigned long flags;
+	u_int16_t u2Cnt = 0;
+
+	if (prAdapter == NULL) {
+		DBGLOG(HAL, ERROR, "prAdapter is NULL error\n");
+		return 0;
+	}
+	prGlueInfo = prAdapter->prGlueInfo;
+	prHifInfo = &prGlueInfo->rHifInfo;
+
+	spin_lock_irqsave(&prHifInfo->rTxCmdQLock, flags);
+	list_for_each_entry_safe(prUsbReq, prNext, &prHifInfo->rTxCmdFreeQ, list)
+		u2Cnt++;
+	spin_unlock_irqrestore(&prHifInfo->rTxCmdQLock, flags);
+	return u2Cnt;
 }
 
 u_int8_t halTxIsDataBufEnough(IN struct ADAPTER *prAdapter, IN struct MSDU_INFO *prMsduInfo)
@@ -1345,6 +1642,47 @@ uint8_t halTxRingDataSelect(IN struct ADAPTER *prAdapter,
 
 void halUpdateTxMaxQuota(IN struct ADAPTER *prAdapter)
 {
+	struct BUS_INFO *prBusInfo;
+	uint32_t u4Ret;
+	uint32_t u4Quota;
+	bool fgRun;
+	uint8_t ucWmmIndex;
+	KAL_SPIN_LOCK_DECLARATION();
+
+	prBusInfo = prAdapter->chip_info->bus_info;
+
+	for (ucWmmIndex = 0; ucWmmIndex < prAdapter->ucWmmSetNum;
+		ucWmmIndex++) {
+		u4Ret = WLAN_STATUS_SUCCESS;
+
+		KAL_ACQUIRE_SPIN_LOCK(prAdapter, SPIN_LOCK_UPDATE_WMM_QUOTA);
+		u4Quota = prAdapter->rWmmQuotaReqCS[ucWmmIndex].u4Quota;
+		fgRun = prAdapter->rWmmQuotaReqCS[ucWmmIndex].fgRun;
+		KAL_RELEASE_SPIN_LOCK(prAdapter, SPIN_LOCK_UPDATE_WMM_QUOTA);
+
+		if (fgRun) {
+			if (prBusInfo->updateTxRingMaxQuota) {
+				u4Ret = prBusInfo->updateTxRingMaxQuota(
+					prAdapter, (uint16_t)ucWmmIndex, u4Quota);
+			} else {
+				DBGLOG(HAL, INFO,
+					"updateTxRingMaxQuota not implemented\n");
+				u4Ret = WLAN_STATUS_NOT_ACCEPTED;
+			}
+		}
+
+		DBGLOG(HAL, INFO,
+			"WmmQuota,Run,%u,Wmm,%u,Quota,0x%x,ret=0x%x\n",
+			fgRun, ucWmmIndex, u4Quota, u4Ret);
+		if (u4Ret != WLAN_STATUS_PENDING) {
+			KAL_ACQUIRE_SPIN_LOCK(prAdapter,
+				SPIN_LOCK_UPDATE_WMM_QUOTA);
+			prAdapter->rWmmQuotaReqCS[ucWmmIndex].fgRun
+				= false;
+			KAL_RELEASE_SPIN_LOCK(prAdapter,
+				SPIN_LOCK_UPDATE_WMM_QUOTA);
+		}
+	}
 }
 
 void halProcessTxInterrupt(IN struct ADAPTER *prAdapter)
@@ -1376,6 +1714,28 @@ void halProcessTxInterrupt(IN struct ADAPTER *prAdapter)
 
 bool halHifSwInfoInit(IN struct ADAPTER *prAdapter)
 {
+	struct mt66xx_chip_info *prChipInfo;
+	struct BUS_INFO *prBusInfo;
+
+	prChipInfo = prAdapter->chip_info;
+	prBusInfo = prChipInfo->bus_info;
+
+	if (prBusInfo->DmaShdlInit)
+		prBusInfo->DmaShdlInit(prAdapter);
+
+	if (prChipInfo->asicUsbInit)
+		prChipInfo->asicUsbInit(prAdapter, prChipInfo);
+
+	if (prBusInfo->asicUdmaRxFlush)
+		prBusInfo->asicUdmaRxFlush(prAdapter, FALSE);
+
+	/* set USB EP_RST_OPT as reset scope excludes toggle
+	 * bit,sequence number, etc.
+	 */
+	if (prBusInfo->asicUsbEpctlRstOpt)
+		prBusInfo->asicUsbEpctlRstOpt(prAdapter,
+					      FALSE);
+
 	return true;
 }
 
@@ -1384,7 +1744,17 @@ void halRxProcessMsduReport(IN struct ADAPTER *prAdapter, IN OUT struct SW_RFB *
 
 }
 
-uint32_t halTxGetPageCount(IN struct ADAPTER *prAdapter, IN uint32_t u4FrameLength, IN u_int8_t fgIncludeDesc)
+#if (CFG_SUPPORT_CONNAC3X == 1)
+u_int8_t halProcessToken(IN struct ADAPTER *prAdapter,
+	IN uint32_t u4Token,
+	IN struct QUE *prFreeQueue)
+{
+	return 0;
+}
+#endif
+
+static uint32_t halTxGetPageCount(IN struct ADAPTER *prAdapter,
+	IN uint32_t u4FrameLength, IN u_int8_t fgIncludeDesc)
 {
 #if CFG_USB_TX_AGG
 	struct mt66xx_chip_info *prChipInfo = prAdapter->chip_info;
@@ -1413,6 +1783,18 @@ uint32_t halTxGetPageCount(IN struct ADAPTER *prAdapter, IN uint32_t u4FrameLeng
 #else
 	return 1;
 #endif
+}
+
+uint32_t halTxGetDataPageCount(IN struct ADAPTER *prAdapter,
+	IN uint32_t u4FrameLength, IN u_int8_t fgIncludeDesc)
+{
+	return halTxGetPageCount(prAdapter, u4FrameLength, fgIncludeDesc);
+}
+
+uint32_t halTxGetCmdPageCount(IN struct ADAPTER *prAdapter,
+	IN uint32_t u4FrameLength, IN u_int8_t fgIncludeDesc)
+{
+	return halTxGetPageCount(prAdapter, u4FrameLength, fgIncludeDesc);
 }
 
 uint32_t halTxPollingResource(IN struct ADAPTER *prAdapter, IN uint8_t ucTC)
@@ -1465,6 +1847,18 @@ void halProcessRxInterrupt(IN struct ADAPTER *prAdapter)
 			&prHifInfo->rRxEventFreeQ, USB_RX_EVENT_RFB_RSV_CNT);
 		halRxUSBReceiveEvent(prAdapter, FALSE);
 	}
+
+#if CFG_CHIP_RESET_SUPPORT
+	if (prAdapter->chip_info->fgIsSupportL0p5Reset &&
+	    prAdapter->chip_info->bus_info->fgIsSupportWdtEp) {
+		halRxUSBProcessWdtComplete(prAdapter,
+					   &prHifInfo->rRxWdtCompleteQ,
+					   &prHifInfo->rRxWdtFreeQ,
+					   USB_RX_WDT_RFB_RSV_CNT);
+
+		halRxUSBReceiveWdt(prAdapter);
+	}
+#endif
 }
 
 uint32_t halDumpHifStatus(IN struct ADAPTER *prAdapter, IN uint8_t *pucBuf, IN uint32_t u4Max)
@@ -1558,10 +1952,14 @@ void halUSBPreSuspendCmd(IN struct ADAPTER *prAdapter)
 	struct CMD_HIF_CTRL rCmdHifCtrl;
 	uint32_t rStatus;
 
+	kalMemSet(&rCmdHifCtrl, 0, sizeof(struct CMD_HIF_CTRL));
+
 	rCmdHifCtrl.ucHifType = ENUM_HIF_TYPE_USB;
 	rCmdHifCtrl.ucHifDirection = ENUM_HIF_TX;
 	rCmdHifCtrl.ucHifStop = 1;
 	rCmdHifCtrl.ucHifSuspend = 1;
+	rCmdHifCtrl.u4WakeupHifType = ENUM_CMD_HIF_WAKEUP_TYPE_USB;
+
 	rStatus = wlanSendSetQueryCmd(prAdapter,	/* prAdapter */
 				      CMD_ID_HIF_CTRL,	/* ucCID */
 				      TRUE,	/* fgSetQuery */
@@ -1575,7 +1973,8 @@ void halUSBPreSuspendCmd(IN struct ADAPTER *prAdapter)
 				      0	/* u4SetQueryBufferLen */
 				     );
 
-	ASSERT(rStatus == WLAN_STATUS_PENDING);
+	if (rStatus != WLAN_STATUS_PENDING)
+		DBGLOG(HAL, ERROR, "wlanSendSetQueryCmd error\n");
 }
 
 /*----------------------------------------------------------------------------*/
@@ -1593,10 +1992,13 @@ void halUSBPreResumeCmd(IN struct ADAPTER *prAdapter)
 	struct CMD_HIF_CTRL rCmdHifCtrl;
 	uint32_t rStatus;
 
+	kalMemSet(&rCmdHifCtrl, 0, sizeof(struct CMD_HIF_CTRL));
+
 	rCmdHifCtrl.ucHifType = ENUM_HIF_TYPE_USB;
 	rCmdHifCtrl.ucHifDirection = ENUM_HIF_TX;
 	rCmdHifCtrl.ucHifStop = 0;
 	rCmdHifCtrl.ucHifSuspend = 0;
+	rCmdHifCtrl.u4WakeupHifType = ENUM_CMD_HIF_WAKEUP_TYPE_USB;
 
 	rStatus = wlanSendSetQueryCmd(prAdapter, /* prAdapter */
 				CMD_ID_HIF_CTRL,	/* ucCID */
@@ -1611,7 +2013,8 @@ void halUSBPreResumeCmd(IN struct ADAPTER *prAdapter)
 				0		/* u4SetQueryBufferLen */
 	    );
 
-	ASSERT(rStatus == WLAN_STATUS_PENDING);
+	if (rStatus != WLAN_STATUS_PENDING)
+		DBGLOG(HAL, ERROR, "wlanSendSetQueryCmd error\n");
 }
 
 void halUSBPreSuspendDone(IN struct ADAPTER *prAdapter, IN struct CMD_INFO *prCmdInfo, IN uint8_t *pucEventBuf)
@@ -1619,14 +2022,17 @@ void halUSBPreSuspendDone(IN struct ADAPTER *prAdapter, IN struct CMD_INFO *prCm
 	unsigned long flags;
 	struct GL_HIF_INFO *prHifInfo;
 
-	ASSERT(prAdapter);
+	if (prAdapter == NULL) {
+		DBGLOG(HAL, ERROR, "prAdapter is NULL error\n");
+		return;
+	}
 	prHifInfo = &prAdapter->prGlueInfo->rHifInfo;
 
 	spin_lock_irqsave(&prHifInfo->rStateLock, flags);
 
 	if (prHifInfo->state == USB_STATE_LINK_UP
-		|| prHifInfo->state == USB_STATE_PRE_SUSPEND_START)
-		prHifInfo->state = USB_STATE_PRE_SUSPEND_DONE;
+		|| prHifInfo->state == USB_STATE_PRE_SUSPEND)
+		prHifInfo->state = USB_STATE_SUSPEND;
 	else
 		DBGLOG(HAL, ERROR, "Previous USB state (%d)!\n",
 			prHifInfo->state);
@@ -1639,13 +2045,16 @@ void halUSBPreSuspendTimeout(IN struct ADAPTER *prAdapter, IN struct CMD_INFO *p
 	unsigned long flags;
 	struct GL_HIF_INFO *prHifInfo;
 
-	ASSERT(prAdapter);
+	if (prAdapter == NULL) {
+		DBGLOG(HAL, ERROR, "prAdapter is NULL error\n");
+		return;
+	}
 	prHifInfo = &prAdapter->prGlueInfo->rHifInfo;
 
 	spin_lock_irqsave(&prHifInfo->rStateLock, flags);
 
 	if (prHifInfo->state == USB_STATE_LINK_UP
-		|| prHifInfo->state == USB_STATE_PRE_SUSPEND_START)
+		|| prHifInfo->state == USB_STATE_PRE_SUSPEND)
 		prHifInfo->state = USB_STATE_PRE_SUSPEND_FAIL;
 	else
 		DBGLOG(HAL, ERROR, "Previous USB state (%d)!\n",
@@ -1752,36 +2161,158 @@ void halTxResourceResetHwTQCounter(IN struct ADAPTER *prAdapter)
 {
 }
 
-uint32_t halGetHifTxPageSize(IN struct ADAPTER *prAdapter)
+static uint32_t halGetHifTxPageSize(IN struct ADAPTER *prAdapter)
 {
 	return HIF_TX_PAGE_SIZE;
 }
 
-void halSerSyncTimerHandler(IN struct ADAPTER *prAdapter)
+uint32_t halGetHifTxCmdPageSize(IN struct ADAPTER *prAdapter)
 {
-	static u_int8_t ucSerState = ERR_RECOV_STOP_IDLE;
-	uint32_t u4SerAction;
-	struct mt66xx_chip_info *prChipInfo;
+	return halGetHifTxPageSize(prAdapter);
+}
 
-	if (prAdapter->prGlueInfo->rHifInfo.state == USB_STATE_SUSPEND)
+uint32_t halGetHifTxDataPageSize(IN struct ADAPTER *prAdapter)
+{
+	return halGetHifTxPageSize(prAdapter);
+}
+
+u_int8_t halSerHappendInSuspend(IN struct ADAPTER *prAdapter)
+{
+	uint32_t u4SerEvnt;
+
+	if (!prAdapter->chip_info->u4SerSuspendSyncAddr)
+		return FALSE;
+
+	HAL_MCR_RD(prAdapter, prAdapter->chip_info->u4SerSuspendSyncAddr,
+		   &u4SerEvnt);
+
+	return !!(u4SerEvnt & ERROR_DETECT_L1_TRIGGER_IN_SUSPEND);
+}
+
+void halSerPollDoneInSuspend(IN struct ADAPTER *prAdapter)
+{
+	uint32_t u4SerEvnt;
+	uint32_t u4Tick;
+
+	if (!prAdapter->chip_info->u4SerSuspendSyncAddr)
 		return;
 
-	prChipInfo = prAdapter->chip_info;
+	u4Tick = kalGetTimeTick();
 
-	/* get MCU SER event */
-	kalDevRegRead(prAdapter->prGlueInfo, prChipInfo->u4SerUsbMcuEventAddr,
-			 &u4SerAction);
+	while (1) {
+		HAL_MCR_RD(prAdapter,
+			   prAdapter->chip_info->u4SerSuspendSyncAddr,
+			   &u4SerEvnt);
 
-	if (u4SerAction) {
-		DBGLOG(NIC, INFO, "%s u4SerAction=0x%08X\n", __func__,
-			 u4SerAction);
+		if (u4SerEvnt & ERROR_DETECT_L1_DONE_IN_SUSPEND) {
+			DBGLOG(HAL, INFO, "[SER][L1] reset done in suspend\n");
 
-		/* clear MCU SER event */
-		kalDevRegWrite(prAdapter->prGlueInfo,
-				prChipInfo->u4SerUsbMcuEventAddr, 0);
+			break;
+		}
+
+		kalMsleep(10);
+
+		if (CHECK_FOR_TIMEOUT(kalGetTimeTick(), u4Tick,
+			       MSEC_TO_SYSTIME(WIFI_SER_L1_RST_DONE_TIMEOUT))) {
+
+			DBGLOG(HAL, ERROR,
+			       "[SER][L1] reset timeout in suspend\n");
+			break;
+		}
 	}
 
-	switch (ucSerState) {
+	/* clear SER bits */
+	HAL_MCR_RD(prAdapter, prAdapter->chip_info->u4SerSuspendSyncAddr,
+		   &u4SerEvnt);
+	u4SerEvnt &= ~(ERROR_DETECT_L1_TRIGGER_IN_SUSPEND |
+		       ERROR_DETECT_L1_DONE_IN_SUSPEND);
+	HAL_MCR_WR(prAdapter, prAdapter->chip_info->u4SerSuspendSyncAddr,
+		   u4SerEvnt);
+}
+
+uint32_t halSerGetMcuEvent(IN struct ADAPTER *prAdapter, IN u_int8_t fgClear)
+{
+	struct GLUE_INFO *prGlueInfo;
+	struct mt66xx_chip_info *prChipInfo;
+	struct GL_HIF_INFO *prHifInfo;
+	uint32_t u4SerAction;
+	enum usb_state state;
+
+	prGlueInfo = prAdapter->prGlueInfo;
+	prChipInfo = prAdapter->chip_info;
+	prHifInfo = &prGlueInfo->rHifInfo;
+
+	state = glUsbGetState(prHifInfo);
+	if (!(state == USB_STATE_PRE_SUSPEND
+		|| state == USB_STATE_PRE_RESUME
+		|| state == USB_STATE_LINK_UP))
+		return 0;
+
+	/* get MCU SER event */
+	if (!kalDevRegRead(prGlueInfo,
+			   prChipInfo->u4SerUsbMcuEventAddr,
+			   &u4SerAction)) {
+		DBGLOG(NIC, WARN, "get MCU SER event fail\n");
+
+		u4SerAction = 0;
+
+		goto out;
+	}
+
+	if (u4SerAction && fgClear) {
+		DBGLOG(NIC, INFO, "u4SerAction=0x%08X\n", u4SerAction);
+
+		/* clear MCU SER event */
+		kalDevRegWrite(prGlueInfo,
+			       prChipInfo->u4SerUsbMcuEventAddr, 0);
+	}
+
+out:
+	return u4SerAction;
+}
+
+void halSerSyncTimerHandler(IN struct ADAPTER *prAdapter)
+{
+	struct ERR_RECOVERY_CTRL_T *prErrRecoveryCtrl;
+	uint32_t u4SerAction;
+	struct mt66xx_chip_info *prChipInfo;
+	struct BUS_INFO *prBusInfo;
+
+	prChipInfo = prAdapter->chip_info;
+	prBusInfo = prChipInfo->bus_info;
+	prErrRecoveryCtrl = &prAdapter->prGlueInfo->rHifInfo.rErrRecoveryCtl;
+
+	/* get MCU SER event */
+	u4SerAction = halSerGetMcuEvent(prAdapter, TRUE);
+	if (u4SerAction == 0)
+		return;
+	else {
+		if ((prAdapter->rWifiVar.eEnableSerL1 !=
+		     FEATURE_OPT_SER_ENABLE)
+#if (CFG_SUPPORT_WFDMA_REALLOC == 1)
+		    /* Since the execution of wfdma realloc relies on L1 reset,
+		     * it self becomes one of the condition checks of whether
+		     * perform L1 reset or not. Ex: If wfdma realloc is
+		     * supported and not done yet, then the perform of L1 reset
+		     * is allowed.
+		     */
+		    && !(prAdapter->fgIsSupportWfdmaRealloc &&
+			 !prAdapter->fgWfdmaReallocDone)
+#endif /* CFG_SUPPORT_WFDMA_REALLOC */
+			) {
+			if (prChipInfo->asicDumpSerDummyCR)
+				prChipInfo->asicDumpSerDummyCR(prAdapter);
+
+			DBGLOG(HAL, WARN,
+			       "[SER][L1] Bypass L1 reset due to wifi.cfg\n");
+
+			GL_DEFAULT_RESET_TRIGGER(prAdapter, RST_SER_L1_FAIL);
+
+			return;
+		}
+	}
+
+	switch (prErrRecoveryCtrl->eErrRecovState) {
 	case ERR_RECOV_STOP_IDLE:
 		if (u4SerAction == ERROR_DETECT_STOP_PDMA) {
 			if (prChipInfo->asicDumpSerDummyCR)
@@ -1804,7 +2335,8 @@ void halSerSyncTimerHandler(IN struct ADAPTER *prAdapter)
 			kalDevRegWrite(prAdapter->prGlueInfo,
 					prChipInfo->u4SerUsbHostAckAddr,
 					MCU_INT_PDMA0_STOP_DONE);
-			ucSerState = ERR_RECOV_STOP_PDMA0;
+			prErrRecoveryCtrl->eErrRecovState =
+				ERR_RECOV_STOP_PDMA0;
 		} else {
 			/* do nothing */
 		}
@@ -1814,6 +2346,7 @@ void halSerSyncTimerHandler(IN struct ADAPTER *prAdapter)
 		if (u4SerAction == ERROR_DETECT_RESET_DONE) {
 			DBGLOG(HAL, INFO, "SER(L) Host re-initialize WFDMA\n");
 			DBGLOG(HAL, INFO, "SER(M) Host enable WFDMA\n");
+
 			if (prChipInfo->asicUsbInit)
 				prChipInfo->asicUsbInit(prAdapter, prChipInfo);
 
@@ -1824,20 +2357,25 @@ void halSerSyncTimerHandler(IN struct ADAPTER *prAdapter)
 					prChipInfo->u4SerUsbHostAckAddr,
 					MCU_INT_PDMA0_INIT_DONE);
 
-			ucSerState = ERR_RECOV_RESET_PDMA0;
+			prErrRecoveryCtrl->eErrRecovState =
+				ERR_RECOV_RESET_PDMA0;
 		} else {
 			/* do nothing */
 		}
 		break;
 	case ERR_RECOV_RESET_PDMA0:
 		if (u4SerAction == ERROR_DETECT_RECOVERY_DONE) {
+			if (prBusInfo->DmaShdlReInit)
+				prBusInfo->DmaShdlReInit(prAdapter);
+
 			DBGLOG(HAL, INFO,
 				"SER(Q) Host ACK MCU SER handle done\n");
 			/* Send Host stops TX/RX done response to mcu */
 			kalDevRegWrite(prAdapter->prGlueInfo,
 				prChipInfo->u4SerUsbHostAckAddr,
 				MCU_INT_PDMA0_RECOVERY_DONE);
-			ucSerState = ERR_RECOV_WAIT_MCU_NORMAL;
+			prErrRecoveryCtrl->eErrRecovState =
+				ERR_RECOV_WAIT_MCU_NORMAL;
 		} else {
 			/* do nothing */
 		}
@@ -1845,7 +2383,6 @@ void halSerSyncTimerHandler(IN struct ADAPTER *prAdapter)
 
 	case ERR_RECOV_WAIT_MCU_NORMAL:
 		if (u4SerAction == ERROR_DETECT_MCU_NORMAL_STATE) {
-
 			/* update Beacon frame if operating in AP mode. */
 			DBGLOG(HAL, INFO, "SER(T) Host re-initialize BCN\n");
 			nicSerReInitBeaconFrame(prAdapter);
@@ -1853,46 +2390,38 @@ void halSerSyncTimerHandler(IN struct ADAPTER *prAdapter)
 			DBGLOG(HAL, INFO,
 				"SER(U) Host reset TX/RX endpoint\n");
 
-			halSerHifReset(prAdapter);
-			halEnableInterrupt(prAdapter);
+			/* It's surprising that the toggle bit or sequence
+			 * number of USB endpoints in some USB hosts cannot be
+			 * reset by kernel API usb_reset_endpoint(). In order to
+			 * prevent this IOT, we tend to do not reset toggle bit
+			 * and sequence number on both device and host in some
+			 * project like MT7961. In MT7961, we can choose that
+			 * endpoints reset excludes toggle bit and sequence
+			 * number through asicUsbEpctlRstOpt().
+			 */
+			if (!prBusInfo->asicUsbEpctlRstOpt)
+				halSerHifReset(prAdapter);
 
 			/* resume TX/RX */
 			nicSerStartTxRx(prAdapter);
-			ucSerState = ERR_RECOV_STOP_IDLE;
+
+			halEnableInterrupt(prAdapter);
+
+			prErrRecoveryCtrl->eErrRecovState = ERR_RECOV_STOP_IDLE;
+
+#if (CFG_SUPPORT_WFDMA_REALLOC == 1)
+			if (prAdapter->fgOidWfdmaReallocPend) {
+				prAdapter->fgOidWfdmaReallocPend = FALSE;
+
+				kalOidComplete(prAdapter->prGlueInfo,
+					       TRUE, 0, WLAN_STATUS_SUCCESS);
+			}
+#endif /* CFG_SUPPORT_WFDMA_REALLOC */
 		} else {
 			/* do nothing */
 		}
 		break;
 	}
-}
-
-/*----------------------------------------------------------------------------*/
-/*!
-* @brief Check if HIF state is READY for upper layer cfg80211
-*
-* @param prAdapter      Pointer to the Adapter structure.
-*
-* @return (TRUE: ready, FALSE: not ready)
-*/
-/*----------------------------------------------------------------------------*/
-bool halIsHifStateReady(IN struct ADAPTER *prAdapter, uint8_t *pucState)
-{
-	if (!prAdapter)
-		return FALSE;
-
-	if (!prAdapter->prGlueInfo)
-		return FALSE;
-
-	if (prAdapter->prGlueInfo->u4ReadyFlag == 0)
-		return FALSE;
-
-	if (pucState)
-		*pucState = prAdapter->prGlueInfo->rHifInfo.state;
-
-	if (prAdapter->prGlueInfo->rHifInfo.state != USB_STATE_READY)
-		return FALSE;
-
-	return TRUE;
 }
 
 /*----------------------------------------------------------------------------*/
@@ -1912,8 +2441,33 @@ bool halIsHifStateLinkup(IN struct ADAPTER *prAdapter)
 	if (!prAdapter->prGlueInfo)
 		return FALSE;
 
-	if ((prAdapter->prGlueInfo->rHifInfo.state != USB_STATE_LINK_UP) &&
-		(prAdapter->prGlueInfo->rHifInfo.state != USB_STATE_READY))
+	if (prAdapter->prGlueInfo->rHifInfo.state != USB_STATE_LINK_UP)
+		return FALSE;
+
+	return TRUE;
+}
+
+/*----------------------------------------------------------------------------*/
+/*!
+* @brief Check if HIF state is READY for upper layer cfg80211
+*
+* @param prAdapter      Pointer to the Adapter structure.
+*
+* @return (TRUE: ready, FALSE: not ready)
+*/
+/*----------------------------------------------------------------------------*/
+bool halIsHifStateReady(IN struct ADAPTER *prAdapter, uint8_t *pucState)
+{
+	if (!prAdapter)
+		return FALSE;
+
+	if (!prAdapter->prGlueInfo)
+		return FALSE;
+
+	if (pucState)
+		*pucState = prAdapter->prGlueInfo->rHifInfo.state;
+
+	if (prAdapter->prGlueInfo->rHifInfo.state != USB_STATE_LINK_UP)
 		return FALSE;
 
 	return TRUE;

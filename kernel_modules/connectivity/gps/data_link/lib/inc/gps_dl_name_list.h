@@ -23,3 +23,4 @@ const char *gps_dl_hal_event_name(enum gps_dl_hal_event_id event);
 const char *gps_dl_waitable_type_name(enum gps_each_link_waitable_type type);
 
 #endif /* _GPS_DL_NAME_LIST_H */
+

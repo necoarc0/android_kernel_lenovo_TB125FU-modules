@@ -1,7 +1,8 @@
-/* SPDX-License-Identifier: GPL-2.0 */  
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2018 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  */
+
 #ifndef __BTMTK_WOBLE_H__
 #define __BTMTK_WOBLE_H__
 #include "btmtk_define.h"
@@ -9,15 +10,10 @@
 
 /* Define for WoBLE */
 #define WOBLE_SETTING_COUNT 10
+#define WOBLE_SETTING_FILE_NAME_7663 "woble_setting_7663.bin"
+#define WOBLE_SETTING_FILE_NAME_7961 "woble_setting_7961.bin"
 #define WOBLE_EVENT_INTERVAL_TIMO	500
 #define WOBLE_COMP_EVENT_TIMO		5000
-
-/* WOBX attribute type */
-#define WOBX_TRIGGER_INFO_ADDR_TYPE		1
-#define WOBX_TRIGGER_INFO_ADV_DATA_TYPE		2
-#define WOBX_TRIGGER_INFO_TRACE_LOG_TYPE	3
-#define WOBX_TRIGGER_INFO_SCAN_LOG_TYPE		4
-#define WOBX_TRIGGER_INFO_TRIGGER_CNT_TYPE	5
 
 struct btmtk_woble {
 	unsigned char	*woble_setting_file_name;
@@ -53,9 +49,5 @@ int btmtk_woble_resume(struct btmtk_woble *bt_woble);
 int btmtk_woble_initialize(struct btmtk_dev *bdev, struct btmtk_woble *bt_woble);
 void btmtk_woble_uninitialize(struct btmtk_woble *bt_woble);
 void btmtk_woble_wake_unlock(struct btmtk_dev *bdev);
-#if WAKEUP_BT_IRQ
-void btmtk_sdio_irq_wake_lock_timeout(struct btmtk_dev *bdev);
-#endif
-int btmtk_send_apcf_reserved(struct btmtk_dev *bdev);
 
 #endif /* __BTMTK_WOBLE_H__ */

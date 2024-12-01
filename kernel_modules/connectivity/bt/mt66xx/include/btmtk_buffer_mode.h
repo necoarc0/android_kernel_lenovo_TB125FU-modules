@@ -1,7 +1,8 @@
-/* SPDX-License-Identifier: GPL-2.0 */  
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2016,2017 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  */
+
 
 #ifndef __BTMTK_BUFFER_MODE_H__
 #define __BTMTK_BUFFER_MODE_H__
@@ -84,3 +85,4 @@ struct btmtk_buffer_mode_struct {
 int btmtk_buffer_mode_send(struct btmtk_buffer_mode_struct *buffer_mode);
 void btmtk_buffer_mode_initialize(struct btmtk_dev *bdev, struct btmtk_buffer_mode_struct **buffer_mode);
 #endif /* __BTMTK_BUFFER_MODE_H__ */
+

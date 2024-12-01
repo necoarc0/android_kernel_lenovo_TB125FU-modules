@@ -202,3 +202,4 @@
 #define BGF_GPS_DMA_DMA4_STATE_STATE_SHFT                      0
 
 #endif /* __BGF_GPS_DMA_REGS_H__ */
+

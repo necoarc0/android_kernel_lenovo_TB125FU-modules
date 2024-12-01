@@ -23,3 +23,4 @@
 #define GPS_AON_TOP_DSLEEP_CTL_GPS_PWR_STAT_SHFT               0
 
 #endif /* __GPS_AON_TOP_REGS_H__ */
+

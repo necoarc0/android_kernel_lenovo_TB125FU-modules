@@ -1,54 +1,7 @@
-/******************************************************************************
- *
- * This file is provided under a dual license.  When you use or
- * distribute this software, you may choose to be licensed under
- * version 2 of the GNU General Public License ("GPLv2 License")
- * or BSD License.
- *
- * GPLv2 License
- *
- * Copyright(C) 2016 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * BSD LICENSE
- *
- * Copyright(C) 2016 MediaTek Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2016 MediaTek Inc.
+ */
 /*
  ** Id: //Department/DaVinci/BRANCHES/MT6620_WIFI_DRIVER_V2_3/mgmt/aaa_fsm.c#3 $
  */
@@ -232,6 +185,9 @@ void aaaFsmRunEventTxReqTimeOut(IN struct ADAPTER *prAdapter,
 		"EVENT-TIMER: TX REQ TIMEOUT, Current Time = %d\n",
 		kalGetTimeTick());
 
+	/* Trigger statistics log if Auth/Assoc Tx timeout */
+	wlanTriggerStatsLog(prAdapter, prAdapter->rWifiVar.u4StatsLogDuration);
+
 	switch (prStaRec->eAuthAssocState) {
 	case AAA_STATE_SEND_AUTH2:
 		DBGLOG(AAA, ERROR,
@@ -302,6 +258,7 @@ void aaaFsmRunEventRxAuth(IN struct ADAPTER *prAdapter,
 	uint16_t u2StatusCode;
 	u_int8_t fgReplyAuth = FALSE;
 	struct WLAN_AUTH_FRAME *prAuthFrame = (struct WLAN_AUTH_FRAME *) NULL;
+	uint32_t rStatus = WLAN_STATUS_FAILURE;
 
 	ASSERT(prAdapter);
 
@@ -312,7 +269,11 @@ void aaaFsmRunEventRxAuth(IN struct ADAPTER *prAdapter,
 			"SA: " MACSTR ", bssid: " MACSTR ", %d %d sta: %d\n",
 			MAC2STR(prAuthFrame->aucSrcAddr),
 			MAC2STR(prAuthFrame->aucBSSID),
+#if (CFG_SUPPORT_SUPPLICANT_SME == 1)
+			prAuthFrame->aucAuthData[0],
+#else
 			prAuthFrame->u2AuthTransSeqNo,
+#endif
 			prAuthFrame->u2AuthAlgNum,
 			prSwRfb->ucStaRecIdx);
 
@@ -353,31 +314,22 @@ void aaaFsmRunEventRxAuth(IN struct ADAPTER *prAdapter,
 						&u2StatusCode);
 
 #if CFG_SUPPORT_802_11W
-					if (prBssInfo->u4RsnSelectedAKMSuite ==
-						RSN_AKM_SUITE_SAE)
-						break;
-					if (prBssInfo->u4RsnSelectedAKMSuite ==
-						RSN_AKM_SUITE_OWE)
-						break;
-
 					/* AP PMF, if PMF connection,
 					 * ignore Rx auth
 					 */
 					/* Certification 4.3.3.4 */
-
-					if (prAdapter->rWifiVar
-						.fgSapAuthPolicy ==
-						P2P_AUTH_POLICY_RESET)
-						DBGLOG(P2P, INFO,
-							"Ignore PMF check\n");
-					else if (rsnCheckBipKeyInstalled(
-						prAdapter,
+					if (rsnCheckBipKeyInstalled(prAdapter,
 						prStaRec)) {
 						DBGLOG(AAA, INFO,
 							"Drop RxAuth\n");
 						return;
 					}
 #endif
+				} else if (authFloodingCheck(
+						prAdapter,
+						prBssInfo,
+						prSwRfb) == FALSE) {
+					return;
 				} else {
 					fgReplyAuth = TRUE;
 				}
@@ -492,32 +444,28 @@ bow_proc:
 
 		if (prBssInfo->u4RsnSelectedAKMSuite ==
 			RSN_AKM_SUITE_SAE) {
-			kalP2PIndicateRxMgmtFrame(prAdapter,
+			kalP2PIndicateRxMgmtFrame(
+				prAdapter,
 				prAdapter->prGlueInfo,
 				prSwRfb,
 				FALSE,
 				(uint8_t)prBssInfo->u4PrivateData);
 			DBGLOG(AAA, INFO, "Forward RxAuth\n");
 			return;
-		} else if (prBssInfo->u4RsnSelectedAKMSuite ==
-			RSN_AKM_SUITE_OWE) {
-			kalP2PIndicateRxMgmtFrame(prAdapter,
-				prAdapter->prGlueInfo,
-				prSwRfb,
-				FALSE,
-				(uint8_t)prBssInfo->u4PrivateData);
-			DBGLOG(AAA, INFO, "[OWE] Forward RxAuth\n");
-			return;
 		}
 
 		/* NOTE: Ignore the return status for AAA */
 		/* 4 <4> Reply  Auth */
-		authSendAuthFrame(prAdapter,
-			prStaRec,
-			prBssInfo->ucBssIndex,
-			prSwRfb,
-			AUTH_TRANSACTION_SEQ_2,
-			u2StatusCode);
+		rStatus = authSendAuthFrame(prAdapter,
+					prStaRec,
+					prBssInfo->ucBssIndex,
+					prSwRfb,
+					AUTH_TRANSACTION_SEQ_2,
+					u2StatusCode);
+		if (rStatus != WLAN_STATUS_SUCCESS) {
+			DBGLOG(AAA, WARN, "Send Auth Fail!\n");
+			return;
+		}
 
 
 		/*sta_rec might be removed
@@ -898,16 +846,7 @@ uint32_t aaaFsmRunEventRxAssoc(IN struct ADAPTER *prAdapter,
 
 		/* NOTE: Ignore the return status for AAA */
 		/* 4 <4.2> Reply  Assoc Resp */
-		if (prBssInfo->u4RsnSelectedAKMSuite ==
-			RSN_AKM_SUITE_OWE) {
-			kalP2PIndicateRxMgmtFrame(prAdapter,
-				prAdapter->prGlueInfo,
-				prSwRfb,
-				FALSE,
-				(uint8_t)prBssInfo->u4PrivateData);
-			DBGLOG(AAA, INFO, "[OWE] Forward RxAssoc\n");
-		} else
-			assocSendReAssocRespFrame(prAdapter, prStaRec);
+		assocSendReAssocRespFrame(prAdapter, prStaRec);
 
 #if CFG_SUPPORT_802_11W
 		/* AP PMF */
@@ -961,10 +900,14 @@ aaaFsmRunEventTxDone(IN struct ADAPTER *prAdapter,
 	ASSERT(prStaRec->ucBssIndex <= prAdapter->ucHwBssIdNum);
 
 	prBssInfo = GET_BSS_INFO_BY_INDEX(prAdapter, prStaRec->ucBssIndex);
-	if (!prBssInfo)
-		return WLAN_STATUS_SUCCESS;
+
 	DBGLOG(AAA, TRACE, "TxDone ucStaState:%d, eAuthAssocState:%d\n",
 		prStaRec->ucStaState, prStaRec->eAuthAssocState);
+
+	/* Trigger statistics log if Auth/Assoc Tx failed */
+	if (rTxDoneStatus != TX_RESULT_SUCCESS)
+		wlanTriggerStatsLog(prAdapter,
+			prAdapter->rWifiVar.u4StatsLogDuration);
 
 	switch (prStaRec->eAuthAssocState) {
 	case AAA_STATE_SEND_AUTH2:
@@ -1015,6 +958,11 @@ aaaFsmRunEventTxDone(IN struct ADAPTER *prAdapter,
 						prStaRec);
 
 #endif /* CFG_ENABLE_BT_OVER_WIFI */
+#if CFG_AP_80211KVR_INTERFACE
+				aaaMulAPAgentStaEventNotify(prStaRec,
+					prBssInfo->aucBSSID,
+					prStaRec->fgIsInUse);
+#endif /* CFG_AP_80211KVR_INTERFACE */
 			}
 
 		}
@@ -1031,11 +979,6 @@ aaaFsmRunEventTxDone(IN struct ADAPTER *prAdapter,
 			 */
 			if (assocCheckTxReAssocRespFrame(prAdapter,
 				prMsduInfo) != WLAN_STATUS_SUCCESS)
-				break;
-			if (prBssInfo &&
-					!kalP2PIsTxCarrierOn(prAdapter
-					->prGlueInfo,
-					prBssInfo))
 				break;
 
 			if (prStaRec->u2StatusCode == STATUS_CODE_SUCCESSFUL) {
@@ -1121,6 +1064,447 @@ aaaFsmRunEventTxDone(IN struct ADAPTER *prAdapter,
 	return WLAN_STATUS_SUCCESS;
 
 }				/* end of aaaFsmRunEventTxDone() */
+
+#if CFG_AP_80211KVR_INTERFACE
+#if CFG_SUPPORT_TRAFFIC_REPORT && CFG_WIFI_SUPPORT_NOISE_HISTOGRAM
+uint32_t aaaMulAPAgentChanNoiseControl(
+	struct GLUE_INFO *prGlueInfo,
+	bool fgIsChanNoiseEnable)
+{
+	uint8_t ucBand = ENUM_BAND_0;
+	uint32_t u4BufLen = 0;
+	uint32_t rStatus = WLAN_STATUS_FAILURE;
+	struct CMD_RLM_AIRTIME_MON *cmd_traffic = NULL;
+	struct CMD_NOISE_HISTOGRAM_REPORT *cmd_noise = NULL;
+
+	/* traffic report and noise histogram */
+	cmd_traffic =
+		(struct CMD_RLM_AIRTIME_MON *)
+		kalMemAlloc(sizeof(*cmd_traffic), VIR_MEM_TYPE);
+	if (!cmd_traffic)
+		goto error;
+	cmd_noise =
+		(struct CMD_NOISE_HISTOGRAM_REPORT *)
+		kalMemAlloc(sizeof(*cmd_noise), VIR_MEM_TYPE);
+	if (!cmd_noise)
+		goto error;
+
+	/* set traffic report enable/disable */
+	memset(cmd_traffic, 0, sizeof(*cmd_traffic));
+	cmd_traffic->u2Type = CMD_GET_REPORT_TYPE;
+	cmd_traffic->u2Len = sizeof(*cmd_traffic);
+	cmd_traffic->ucBand = ucBand;
+
+	if (fgIsChanNoiseEnable) {
+		prGlueInfo->prAdapter->u4IsKeepFullPwrBitmap |=
+			KEEP_FULL_PWR_TRAFFIC_REPORT_BIT;
+		cmd_traffic->ucAction = CMD_GET_REPORT_ENABLE;
+	} else {
+		prGlueInfo->prAdapter->u4IsKeepFullPwrBitmap &=
+			~KEEP_FULL_PWR_TRAFFIC_REPORT_BIT;
+		cmd_traffic->ucAction = CMD_GET_REPORT_DISABLE;
+	}
+	cmd_traffic->u2Type |= CMD_ADV_CONTROL_SET;
+
+	rStatus = kalIoctl(prGlueInfo,
+				wlanoidAdvCtrl,
+				cmd_traffic,
+				sizeof(*cmd_traffic),
+				TRUE, TRUE, TRUE,
+				&u4BufLen);
+	if (rStatus != WLAN_STATUS_SUCCESS) {
+		DBGLOG(REQ, ERROR, "ERR: kalIoctl fail (%x)\n", rStatus);
+		goto error;
+	}
+
+	/* set noise histogram enable/disable */
+	memset(cmd_noise, 0, sizeof(*cmd_noise));
+	cmd_noise->u2Type = CMD_NOISE_HISTOGRAM_TYPE;
+	cmd_noise->u2Len = sizeof(*cmd_noise);
+
+	if (fgIsChanNoiseEnable) {
+		prGlueInfo->prAdapter->u4IsKeepFullPwrBitmap |=
+			KEEP_FULL_PWR_NOISE_HISTOGRAM_BIT;
+		cmd_noise->ucAction = CMD_NOISE_HISTOGRAM_ENABLE;
+	} else {
+		prGlueInfo->prAdapter->u4IsKeepFullPwrBitmap &=
+			~KEEP_FULL_PWR_NOISE_HISTOGRAM_BIT;
+		cmd_noise->ucAction = CMD_NOISE_HISTOGRAM_DISABLE;
+	}
+	cmd_noise->u2Type |= CMD_ADV_CONTROL_SET;
+
+	rStatus = kalIoctl(prGlueInfo,
+				wlanoidAdvCtrl,
+				cmd_noise,
+				sizeof(*cmd_noise),
+				TRUE, TRUE, TRUE,
+				&u4BufLen);
+	if (rStatus != WLAN_STATUS_SUCCESS) {
+		DBGLOG(REQ, ERROR, "ERR: kalIoctl fail (%x)\n", rStatus);
+		goto error;
+	}
+
+	rStatus = WLAN_STATUS_SUCCESS;
+error:
+	if (cmd_traffic)
+		kalMemFree(cmd_traffic, VIR_MEM_TYPE, sizeof(*cmd_traffic));
+	if (cmd_noise)
+		kalMemFree(cmd_noise, VIR_MEM_TYPE, sizeof(*cmd_noise));
+
+	return rStatus;
+
+}
+
+void aaaMulAPAgentChanNoiseInitWorkHandler(
+	struct work_struct *work)
+{
+	struct GLUE_INFO *prGlueInfo;
+	uint32_t rStatus = WLAN_STATUS_SUCCESS;
+
+	prGlueInfo = ENTRY_OF(work, struct GLUE_INFO, rChanNoiseControlWork);
+
+	/* Disable traffic report and noise histogram */
+	rStatus = aaaMulAPAgentChanNoiseControl(prGlueInfo, FALSE);
+	if (rStatus != WLAN_STATUS_SUCCESS) {
+		DBGLOG(AAA, ERROR,
+			"Disable traffic report and nose histogram fail\n");
+		goto error;
+	}
+
+	/* Enable traffic report and noise histogram */
+	rStatus = aaaMulAPAgentChanNoiseControl(prGlueInfo, TRUE);
+	if (rStatus != WLAN_STATUS_SUCCESS) {
+		DBGLOG(AAA, ERROR,
+			"Enable traffic report and nose histogram fail\n");
+		goto error;
+	}
+
+error:
+	if (!rStatus)
+		schedule_delayed_work(&prGlueInfo->rChanNoiseGetInfoWork,
+			MSEC_TO_JIFFIES(SAP_CHAN_NOISE_GET_INFO_PERIOD));
+	else
+		schedule_delayed_work(&prGlueInfo->rChanNoiseControlWork, 0);
+}
+
+void  aaaMulAPAgentChanNoiseCollectionWorkHandler(
+	struct work_struct *work)
+{
+	struct GLUE_INFO *prGlueInfo;
+	uint32_t u4BufLen = 0;
+	uint8_t ucRoleIdx = 0;
+	uint8_t ucBssIdx = 0;
+	uint32_t u4SampleDuration = 0;
+	uint32_t u4NoiseTotalCnt = 0;
+	uint8_t ucBand = ENUM_BAND_0;
+	uint32_t rStatus = WLAN_STATUS_SUCCESS;
+	struct BSS_INFO *prBssInfo = NULL;
+	struct CMD_RLM_AIRTIME_MON *cmd_traffic = NULL;
+	struct CMD_NOISE_HISTOGRAM_REPORT *cmd_noise = NULL;
+	struct T_MULTI_AP_BSS_METRICS_RESP *sBssMetricsResp = NULL;
+	int32_t i4Ret = 0;
+
+	prGlueInfo = ENTRY_OF(work, struct GLUE_INFO, rChanNoiseGetInfoWork);
+
+	cmd_traffic = (struct CMD_RLM_AIRTIME_MON *)
+		kalMemAlloc(sizeof(*cmd_traffic), VIR_MEM_TYPE);
+	if (!cmd_traffic)
+		goto error;
+	cmd_noise = (struct CMD_NOISE_HISTOGRAM_REPORT *)
+		kalMemAlloc(sizeof(*cmd_noise), VIR_MEM_TYPE);
+	if (!cmd_noise)
+		goto error;
+
+	/* get Bss Index from ndev */
+	if (mtk_Netdev_To_RoleIdx(prGlueInfo,
+			prGlueInfo->prP2PInfo[1]->prDevHandler,
+			&ucRoleIdx) != 0)
+		goto error;
+	if (p2pFuncRoleToBssIdx(prGlueInfo->prAdapter,
+			ucRoleIdx, &ucBssIdx) != WLAN_STATUS_SUCCESS)
+		goto error;
+	DBGLOG(REQ, INFO, "ucRoleIdx = %d\n", ucRoleIdx);
+	prBssInfo = GET_BSS_INFO_BY_INDEX(prGlueInfo->prAdapter, ucBssIdx);
+	if (!prBssInfo) {
+		DBGLOG(REQ, WARN, "bss is not active\n");
+		goto error;
+	}
+
+	/* get traffic report */
+	memset(cmd_traffic, 0, sizeof(*cmd_traffic));
+	cmd_traffic->u2Type = CMD_GET_REPORT_TYPE;
+	cmd_traffic->u2Len = sizeof(*cmd_traffic);
+	cmd_traffic->ucBand = ucBand;
+	cmd_traffic->ucAction = CMD_GET_REPORT_GET;
+
+	rStatus = kalIoctl(prGlueInfo,
+		wlanoidAdvCtrl,
+		cmd_traffic,
+		sizeof(*cmd_traffic),
+		TRUE, TRUE, TRUE,
+		&u4BufLen);
+	if (rStatus != WLAN_STATUS_SUCCESS) {
+		DBGLOG(REQ, ERROR, "ERR: kalIoctl fail (%x)\n", rStatus);
+		goto error;
+	}
+
+	u4SampleDuration = cmd_traffic->u4FetchEd - cmd_traffic->u4FetchSt;
+	if (!u4SampleDuration)
+		u4SampleDuration = 255;
+
+	prBssInfo->u4ChanUtil = cmd_traffic->u4ChBusy
+		/ (u4SampleDuration / 255);
+
+	DBGLOG(AAA, INFO,
+		"[Traffic Report] u4ChBusy = %d\n", cmd_traffic->u4ChBusy);
+	DBGLOG(AAA, INFO,
+		"[Traffic Report] Duration = %d\n",
+		cmd_traffic->u4FetchEd - cmd_traffic->u4FetchSt);
+
+	/* get noise histogram */
+	memset(cmd_noise, 0, sizeof(*cmd_noise));
+	cmd_noise->u2Type = CMD_NOISE_HISTOGRAM_TYPE;
+	cmd_noise->u2Len = sizeof(*cmd_noise);
+	cmd_noise->ucAction = CMD_NOISE_HISTOGRAM_GET;
+
+	rStatus = kalIoctl(prGlueInfo,
+		wlanoidAdvCtrl,
+		cmd_noise,
+		sizeof(*cmd_noise),
+		TRUE, TRUE, TRUE,
+		&u4BufLen);
+	if (rStatus != WLAN_STATUS_SUCCESS) {
+		DBGLOG(REQ, ERROR, "ERR: kalIoctl fail (%x)\n", rStatus);
+		goto error;
+	}
+
+	u4NoiseTotalCnt =
+		cmd_noise->u4IPI0 + cmd_noise->u4IPI1
+		+ cmd_noise->u4IPI2 + cmd_noise->u4IPI3
+		+ cmd_noise->u4IPI4 + cmd_noise->u4IPI5
+		+ cmd_noise->u4IPI6 + cmd_noise->u4IPI7
+		+ cmd_noise->u4IPI8 + cmd_noise->u4IPI9
+		+ cmd_noise->u4IPI10;
+	if (!u4NoiseTotalCnt)
+		u4NoiseTotalCnt = 1;
+
+	prBssInfo->i4NoiseHistogram =
+		((cmd_noise->u4IPI0 * (95) + cmd_noise->u4IPI1 * (90) +
+		cmd_noise->u4IPI2 * (87) + cmd_noise->u4IPI3 * (84) +
+		cmd_noise->u4IPI4 * (81) + cmd_noise->u4IPI5 * (77) +
+		cmd_noise->u4IPI6 * (72) + cmd_noise->u4IPI7 * (67) +
+		cmd_noise->u4IPI8 * (62) + cmd_noise->u4IPI9 * (57) +
+		cmd_noise->u4IPI10 * (55)) / u4NoiseTotalCnt) * (-1);
+
+	DBGLOG(AAA, INFO,
+		"[Noise Histogram] u4NoiseTotalCnt  = %d\n", u4NoiseTotalCnt);
+	DBGLOG(AAA, INFO,
+		"[Noise Histogram] i4NoiseHistogram  = %d\n",
+		prBssInfo->i4NoiseHistogram);
+
+	sBssMetricsResp = (struct T_MULTI_AP_BSS_METRICS_RESP *)
+			kalMemAlloc(sizeof(struct T_MULTI_AP_BSS_METRICS_RESP),
+			VIR_MEM_TYPE);
+	if (sBssMetricsResp == NULL) {
+		DBGLOG(INIT, ERROR, "alloc memory fail\n");
+		goto error;
+	}
+
+	/* 1. BSS Measurement */
+	/* Interface Index */
+	i4Ret = sscanf(prGlueInfo->prP2PInfo[1]->prDevHandler->name,
+		"ap%u", &sBssMetricsResp->uIfIndex);
+	if (i4Ret != 1)
+		DBGLOG(P2P, WARN, "read sap index fail: %d\n", i4Ret);
+
+	COPY_MAC_ADDR(sBssMetricsResp->mBssid, prBssInfo->aucBSSID);
+	sBssMetricsResp->u8Channel = prBssInfo->ucPrimaryChannel;
+	sBssMetricsResp->u16AssocStaNum =
+		bssGetClientCount(prGlueInfo->prAdapter, prBssInfo);
+	sBssMetricsResp->u8ChanUtil = prBssInfo->u4ChanUtil;
+	sBssMetricsResp->iChanNoise = prBssInfo->i4NoiseHistogram;
+
+	DBGLOG(REQ, INFO,
+		"[SAP_Test] uIfIndex = %u\n", sBssMetricsResp->uIfIndex);
+	DBGLOG(REQ, INFO,
+		"[SAP_Test] mBssid = " MACSTR "\n",
+		MAC2STR(sBssMetricsResp->mBssid));
+	DBGLOG(REQ, INFO,
+		"[SAP_Test] u8Channel = %d\n", sBssMetricsResp->u8Channel);
+	DBGLOG(REQ, INFO,
+		"[SAP_Test] u16AssocStaNum = %d\n",
+		sBssMetricsResp->u16AssocStaNum);
+	DBGLOG(REQ, INFO,
+		"[SAP_Test] u8ChanUtil = %d\n", sBssMetricsResp->u8ChanUtil);
+	DBGLOG(REQ, INFO,
+		"[SAP_Test] iChanNoise = %d\n", sBssMetricsResp->iChanNoise);
+
+	i4Ret = MulAPAgentMontorSendMsg(EV_WLAN_MULTIAP_BSS_METRICS_RESPONSE,
+		sBssMetricsResp, sizeof(*sBssMetricsResp));
+	if (i4Ret < 0)
+		DBGLOG(AAA, ERROR,
+			"EV_WLAN_MULTIAP_BSS_METRICS_RESPONSE nl send msg failed!\n");
+
+	kalMemFree(sBssMetricsResp, VIR_MEM_TYPE, sizeof(*sBssMetricsResp));
+
+error:
+	if (cmd_traffic)
+		kalMemFree(cmd_traffic, VIR_MEM_TYPE, sizeof(*cmd_traffic));
+	if (cmd_noise)
+		kalMemFree(cmd_noise, VIR_MEM_TYPE, sizeof(*cmd_noise));
+
+	aaaMulAPAgentChanNoiseControl(prGlueInfo, FALSE);
+}
+#endif /* #if CFG_SUPPORT_TRAFFIC_REPORT */
+
+void aaaMulAPAgentStaEventNotify(
+	IN struct STA_RECORD *prStaRec, IN unsigned char *pucAddr,
+	IN unsigned char fgIsConnected)
+{
+	int32_t i4Ret = 0;
+	struct T_MULTI_AP_STA_EVENT_NOTIFY *prStaEventNotify;
+
+	/* STA Event notification */
+	/* Multi-AP_Specification_v1.0 17.2.19 */
+	if (prStaRec->u2AssocReqIeLen
+		+ OFFSET_OF(struct T_MULTI_AP_STA_EVENT_NOTIFY, u8Cap)
+		> sizeof(struct T_MULTI_AP_STA_EVENT_NOTIFY)) {
+		DBGLOG(AAA, ERROR,
+			"IE too large %d %d\n",
+			prStaRec->u2AssocReqIeLen,
+			sizeof(struct T_MULTI_AP_STA_EVENT_NOTIFY));
+		return;
+	}
+
+	prStaEventNotify = kalMemAlloc(sizeof(*prStaEventNotify), VIR_MEM_TYPE);
+	if (!prStaEventNotify) {
+		DBGLOG(AAA, ERROR, "mem alloc fail\n");
+		return;
+	}
+
+	COPY_MAC_ADDR(prStaEventNotify->mStaMac, prStaRec->aucMacAddr);
+	COPY_MAC_ADDR(prStaEventNotify->mBssid, pucAddr);
+	prStaEventNotify->u8Status = fgIsConnected;
+	prStaEventNotify->uCapLen = 1 + 2 + 2 + prStaRec->u2AssocReqIeLen;
+	prStaEventNotify->u8Cap[0] = 0; /* 0:Success 1:Fail */
+	WLAN_SET_FIELD_16(prStaEventNotify->u8Cap + 1, prStaRec->u2CapInfo);
+	WLAN_SET_FIELD_16(prStaEventNotify->u8Cap + 3,
+		prStaRec->u2ListenInterval);
+	kalMemCopy(prStaEventNotify->u8Cap + 5,
+		prStaRec->pucAssocReqIe,
+		prStaRec->u2AssocReqIeLen);
+
+	DBGLOG(AAA, INFO,
+		"[SAP_Test] mStaMac=" MACSTR "\n",
+		MAC2STR(prStaEventNotify->mStaMac));
+	DBGLOG(AAA, INFO,
+		"[SAP_Test] mBssid=" MACSTR "\n",
+		MAC2STR(prStaEventNotify->mBssid));
+	DBGLOG(AAA, INFO,
+		"[SAP_Test] u8Status=%d\n", prStaEventNotify->u8Status);
+	DBGLOG(AAA, INFO,
+		"[SAP_Test] uCapLen=%d\n", prStaEventNotify->uCapLen);
+	DBGLOG_MEM8(AAA, INFO,
+		prStaEventNotify,
+		offsetof(struct T_MULTI_AP_STA_EVENT_NOTIFY, u8Cap) + 5);
+	DBGLOG_MEM8(AAA, INFO,
+		prStaEventNotify->u8Cap, prStaEventNotify->uCapLen);
+
+	i4Ret = MulAPAgentMontorSendMsg(EV_WLAN_MULTIAP_STA_TOPOLOGY_NOTIFY,
+		prStaEventNotify, sizeof(*prStaEventNotify));
+	if (i4Ret < 0)
+		DBGLOG(AAA, ERROR,
+			"EV_WLAN_MULTIAP_STA_TOPOLOGY_NOTIFY nl send msg failed!\n");
+
+	kalMemFree(prStaEventNotify, VIR_MEM_TYPE, sizeof(*prStaEventNotify));
+}
+
+void aaaMulAPAgentUnassocStaMeasureTimeout(
+	IN struct ADAPTER *prAdapter, unsigned long ulParamPtr)
+{
+	int32_t i4Ret = 0;
+	uint8_t ucIndex = 0;
+	struct BSS_INFO *prBssInfo = NULL;
+	struct GLUE_INFO *prGlueInfo = NULL;
+	uint8_t aucZeroMacAddr[] = NULL_MAC_ADDR;
+	struct T_MULTI_AP_STA_UNASSOC_METRICS_RESP
+		*sStaUnAssocMetricsResp = NULL;
+
+	prGlueInfo = prAdapter->prGlueInfo;
+
+	prBssInfo = (struct BSS_INFO *) ulParamPtr;
+	if (!prBssInfo) {
+		DBGLOG(REQ, WARN, "bss is not active\n");
+		return;
+	}
+
+	sStaUnAssocMetricsResp =
+		kalMemAlloc(sizeof(*sStaUnAssocMetricsResp), VIR_MEM_TYPE);
+	if (!sStaUnAssocMetricsResp) {
+		DBGLOG(INIT, ERROR, "mem alloc fail\n");
+		return;
+	}
+	kalMemZero(sStaUnAssocMetricsResp,
+		sizeof(struct T_MULTI_AP_STA_UNASSOC_METRICS_RESP));
+
+	/* Interface Index */
+	i4Ret = sscanf(prGlueInfo->prP2PInfo[1]->prDevHandler->name,
+		"ap%u", &sStaUnAssocMetricsResp->uIfIndex);
+	if (i4Ret != 1)
+		DBGLOG(P2P, WARN, "read sap index fail: %d\n", i4Ret);
+
+	COPY_MAC_ADDR(sStaUnAssocMetricsResp->mBssid, prBssInfo->aucBSSID);
+	kalMemCopy(sStaUnAssocMetricsResp->tMetrics,
+		prBssInfo->arUnAssocSTA,
+		sizeof(struct T_MULTI_AP_STA_UNASSOC_METRICS)
+		* SAP_UNASSOC_METRICS_STA_MAX);
+
+	for (ucIndex = 0; ucIndex < SAP_UNASSOC_METRICS_STA_MAX; ucIndex++) {
+		if (EQUAL_MAC_ADDR(aucZeroMacAddr,
+			sStaUnAssocMetricsResp->tMetrics[ucIndex].mStaMac))
+			continue;
+
+		sStaUnAssocMetricsResp->u8StaNum++;
+		if (sStaUnAssocMetricsResp->tMetrics[ucIndex].uTime != 0)
+			sStaUnAssocMetricsResp->tMetrics[ucIndex].uTime =
+				kalGetTimeTick()
+				- sStaUnAssocMetricsResp
+				->tMetrics[ucIndex].uTime;
+	}
+
+	for (ucIndex = 0; ucIndex < SAP_UNASSOC_METRICS_STA_MAX; ucIndex++) {
+		DBGLOG(REQ, INFO,
+			"[SAP_Test] [Report] arUnAssocSTA[%d]="MACSTR
+			",time=%u, RSSI=%d, ch=%d\n",
+			ucIndex,
+			MAC2STR(sStaUnAssocMetricsResp
+				->tMetrics[ucIndex].mStaMac),
+			sStaUnAssocMetricsResp->tMetrics[ucIndex].uTime,
+			sStaUnAssocMetricsResp->tMetrics[ucIndex].iRssi,
+			sStaUnAssocMetricsResp->tMetrics[ucIndex].u8Channel);
+	}
+	DBGLOG(REQ, INFO,
+		"[SAP_Test] uIfIndex = %u\n",
+		sStaUnAssocMetricsResp->uIfIndex);
+	DBGLOG(REQ, INFO,
+		"[SAP_Test] mBssid = " MACSTR "\n",
+		MAC2STR(sStaUnAssocMetricsResp->mBssid));
+	DBGLOG(REQ, INFO,
+		"[SAP_Test] u8StaNum = %u\n",
+		sStaUnAssocMetricsResp->u8StaNum);
+
+	i4Ret = MulAPAgentMontorSendMsg(
+		EV_WLAN_MULTIAP_UNASSOC_STA_METRICS_RESPONSE,
+		sStaUnAssocMetricsResp, sizeof(*sStaUnAssocMetricsResp));
+	if (i4Ret < 0)
+		DBGLOG(AAA, ERROR,
+			"EV_WLAN_MULTIAP_UNASSOC_STA_METRICS_RESPONSE nl send msg failed!\n");
+
+	kalMemFree(sStaUnAssocMetricsResp,
+		VIR_MEM_TYPE,
+		sizeof(struct T_MULTI_AP_STA_UNASSOC_METRICS_RESP));
+}
+#endif
 #endif /* CFG_SUPPORT_AAA */
 
 #if 0

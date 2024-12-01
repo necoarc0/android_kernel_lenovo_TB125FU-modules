@@ -20,3 +20,4 @@ void fw_log_wmt_deinit(void);
 #endif
 
 #endif /*_FW_LOG_WMT_H_*/
+

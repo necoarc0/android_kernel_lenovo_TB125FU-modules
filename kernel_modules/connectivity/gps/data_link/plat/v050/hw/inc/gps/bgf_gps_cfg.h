@@ -25,3 +25,4 @@
 #define BGF_GPS_CFG_GPS_CLKGEN1_CTL_CR_GPS_DIGCK_DIV_EN_SHFT   4
 
 #endif /* __BGF_GPS_CFG_REGS_H__ */
+

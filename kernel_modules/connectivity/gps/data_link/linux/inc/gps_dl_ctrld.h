@@ -34,3 +34,4 @@ int gps_dl_ctrld_init(void);
 int gps_dl_ctrld_deinit(void);
 
 #endif /* _GPS_DL_CTRLD_H */
+

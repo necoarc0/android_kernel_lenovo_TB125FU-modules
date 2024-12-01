@@ -180,3 +180,4 @@ struct btmtk_uart_dev {
 
 //int btmtk_cif_send_calibration(struct hci_dev *hdev);
 #endif
+

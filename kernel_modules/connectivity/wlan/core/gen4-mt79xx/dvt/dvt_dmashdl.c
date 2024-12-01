@@ -1,8 +1,20 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2020 MediaTek Inc.
+ * Copyright (c) 2016 MediaTek Inc.
  */
+/*
+    Module Name:
+    dvt_dmashdl.c
 
+    Abstract:
+    For DMA sheduler DVT.
+    Please refer to DVT plan of DMA SCHEDULER for details
+
+    Revision History:
+    Who         When            What
+    --------    ----------      ----------------------------------------------
+    Kai         2019/01/28      develop this for MT7915 USB(WA)
+*/
 #include "precomp.h"
 
 #if (CFG_SUPPORT_DMASHDL_SYSDVT)

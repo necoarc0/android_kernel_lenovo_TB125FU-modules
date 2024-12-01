@@ -370,3 +370,4 @@ void wmt_step_remove_action(struct step_action *p_act);
 void wmt_step_print_version(void);
 
 #endif /* end of _WMT_STEP_H_ */
+

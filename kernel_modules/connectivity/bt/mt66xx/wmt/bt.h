@@ -133,3 +133,4 @@ extern void bt_state_notify(UINT32 on_off);
 extern ssize_t send_hci_frame(const PUINT8 buf, size_t count);
 
 #endif
+

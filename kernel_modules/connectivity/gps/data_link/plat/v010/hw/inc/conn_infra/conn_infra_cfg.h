@@ -83,3 +83,4 @@
 #define CONN_INFRA_CFG_EMI_CTL_GPS_EMI_REQ_GPS_SHFT            0
 
 #endif /* __CONN_INFRA_CFG_REGS_H__ */
+

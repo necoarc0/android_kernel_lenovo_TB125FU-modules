@@ -21,3 +21,4 @@ typedef u32 conn_reg;
 #define GPS_DL_HW_INVALID_ADDR (0xFFFFFFFF)
 
 #endif /* _GPS_DL_HW_TYPE_H */
+

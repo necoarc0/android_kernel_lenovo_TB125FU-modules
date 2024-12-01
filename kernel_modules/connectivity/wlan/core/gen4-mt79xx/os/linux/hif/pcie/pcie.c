@@ -1,54 +1,7 @@
-/******************************************************************************
- *
- * This file is provided under a dual license.  When you use or
- * distribute this software, you may choose to be licensed under
- * version 2 of the GNU General Public License ("GPLv2 License")
- * or BSD License.
- *
- * GPLv2 License
- *
- * Copyright(C) 2016 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * BSD LICENSE
- *
- * Copyright(C) 2016 MediaTek Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2016 MediaTek Inc.
+ */
 /******************************************************************************
  *[File]             pcie.c
  *[Version]          v1.0
@@ -84,6 +37,7 @@
 
 #include "mt66xx_reg.h"
 
+
 /*******************************************************************************
  *                              C O N S T A N T S
  *******************************************************************************
@@ -99,8 +53,11 @@
 #define NIC7915_PCIe_DEVICE_ID	0x7915
 #define NICSOC3_0_PCIe_DEVICE_ID  0x0789
 #define NIC7961_PCIe_DEVICE_ID	0x7961
+#define NIC7933_PCIe_DEVICE_ID	0x0789
+#define NIC7922_PCIe_DEVICE_ID	0x7922
 #define NICSOC5_0_PCIe_DEVICE_ID  0x0789
-#define NICSOC7_0_PCIe_DEVICE_ID  0x0789
+#define NIC7902_PCIe_DEVICE_ID	0x7902
+#define NIC6639_PCIe_DEVICE_ID 0x3107
 
 static const struct pci_device_id mtk_pci_ids[] = {
 #ifdef MT6632
@@ -122,12 +79,10 @@ static const struct pci_device_id mtk_pci_ids[] = {
 	{	PCI_DEVICE(CONNAC_PCI_VENDOR_ID, CONNAC_PCIe_DEVICE_ID),
 		.driver_data = (kernel_ulong_t)&mt66xx_driver_data_connac},
 #endif /* CONNAC */
-#ifdef SOC2_1X1
-		.driver_data = (kernel_ulong_t)&mt66xx_driver_data_soc2_1x1},
-#endif /* SOC2_1X1 */
-#ifdef SOC2_2X2
-		.driver_data = (kernel_ulong_t)&mt66xx_driver_data_soc2_2x2},
-#endif /* SOC2_2X2 */
+#ifdef CONNAC2X2
+	{	PCI_DEVICE(CONNAC_PCI_VENDOR_ID, CONNAC_PCIe_DEVICE_ID),
+		.driver_data = (kernel_ulong_t)&mt66xx_driver_data_connac2x2},
+#endif /* CONNAC */
 #ifdef MT7915
 	{	PCI_DEVICE(MTK_PCI_VENDOR_ID, NIC7915_PCIe_DEVICE_ID),
 		.driver_data = (kernel_ulong_t)&mt66xx_driver_data_mt7915},
@@ -140,14 +95,26 @@ static const struct pci_device_id mtk_pci_ids[] = {
 	{	PCI_DEVICE(MTK_PCI_VENDOR_ID, NIC7961_PCIe_DEVICE_ID),
 		.driver_data = (kernel_ulong_t)&mt66xx_driver_data_mt7961},
 #endif /* MT7961 */
+#ifdef MT7922
+	{	PCI_DEVICE(MTK_PCI_VENDOR_ID, NIC7922_PCIe_DEVICE_ID),
+		.driver_data = (kernel_ulong_t)&mt66xx_driver_data_mt7922},
+#endif /* MT7922 */
+#ifdef MT7902
+	{	PCI_DEVICE(MTK_PCI_VENDOR_ID, NIC7902_PCIe_DEVICE_ID),
+		.driver_data = (kernel_ulong_t)&mt66xx_driver_data_mt7902},
+#endif /* MT7902 */
+#ifdef MT7933
+	{	PCI_DEVICE(MTK_PCI_VENDOR_ID, NIC7933_PCIe_DEVICE_ID),
+		.driver_data = (kernel_ulong_t)&mt66xx_driver_data_mt7933},
+#endif /* MT7933 */
 #ifdef SOC5_0
 	{	PCI_DEVICE(MTK_PCI_VENDOR_ID, NICSOC5_0_PCIe_DEVICE_ID),
 		.driver_data = (kernel_ulong_t)&mt66xx_driver_data_soc5_0},
 #endif /* SOC5_0 */
-#ifdef SOC7_0
-	{	PCI_DEVICE(MTK_PCI_VENDOR_ID, NICSOC7_0_PCIe_DEVICE_ID),
-		.driver_data = (kernel_ulong_t)&mt66xx_driver_data_soc7_0},
-#endif /* SOC7_0 */
+#ifdef MT6639
+	{	PCI_DEVICE(MTK_PCI_VENDOR_ID, NIC6639_PCIe_DEVICE_ID),
+		.driver_data = (kernel_ulong_t)&mt66xx_driver_data_mt6639},
+#endif /* MT6639 */
 	{ /* end: all zeroes */ },
 };
 
@@ -179,8 +146,6 @@ static struct pci_driver mtk_pci_driver = {
 
 static u_int8_t g_fgDriverProbed = FALSE;
 static uint32_t g_u4DmaMask = 32;
-struct pci_dev *g_prDev;
-static void *CSRBaseAddress;
 /*******************************************************************************
  *                                 M A C R O S
  *******************************************************************************
@@ -248,20 +213,11 @@ static void pcieDumpRx(struct GL_HIF_INFO *prHifInfo,
  * \return void
  */
 /*----------------------------------------------------------------------------*/
-
-static struct mt66xx_hif_driver_data *get_platform_driver_data(void)
-{
-	ASSERT(g_prDev);
-	if (!g_prDev)
-		return NULL;
-
-	return (struct mt66xx_hif_driver_data *) pci_get_drvdata(g_prDev);
-}
+static void *CSRBaseAddress;
 
 static irqreturn_t mtk_pci_interrupt(int irq, void *dev_instance)
 {
 	struct GLUE_INFO *prGlueInfo = NULL;
-	static DEFINE_RATELIMIT_STATE(_rs, 2 * HZ, 1);
 
 	prGlueInfo = (struct GLUE_INFO *) dev_instance;
 	if (!prGlueInfo) {
@@ -271,14 +227,12 @@ static irqreturn_t mtk_pci_interrupt(int irq, void *dev_instance)
 
 	halDisableInterrupt(prGlueInfo->prAdapter);
 
-	if (test_bit(GLUE_FLAG_HALT_BIT, &prGlueInfo->ulFlag)) {
+	if (prGlueInfo->ulFlag & GLUE_FLAG_HALT) {
 		DBGLOG(HAL, INFO, "GLUE_FLAG_HALT skip INT\n");
 		return IRQ_NONE;
 	}
 
 	kalSetIntEvent(prGlueInfo);
-	if (__ratelimit(&_rs))
-		pr_info("[wlan] In HIF ISR.\n");
 
 	return IRQ_HANDLED;
 }
@@ -308,14 +262,17 @@ static int mtk_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto out;
 	}
 
+#if defined(SOC3_0)
+	if ((void *)&mt66xx_driver_data_soc3_0 == (void *)id->driver_data)
+		DBGLOG(INIT, INFO,
+			"[MJ]&mt66xx_driver_data_soc3_0 == id->driver_data\n");
+#endif
+
 	DBGLOG(INIT, INFO, "pci_enable_device done!\n");
 
 	prChipInfo = ((struct mt66xx_hif_driver_data *)
 				id->driver_data)->chip_info;
-	g_prDev = pdev;
 	prChipInfo->pdev = (void *)pdev;
-
-	pci_set_drvdata(pdev, (void *)id->driver_data)
 
 #if (CFG_POWER_ON_DOWNLOAD_EMI_ROM_PATCH == 1)
 		g_fgDriverProbed = TRUE;
@@ -349,8 +306,6 @@ static void mtk_pci_remove(struct pci_dev *pdev)
 	/* Unmap CSR base address */
 	iounmap(CSRBaseAddress);
 
-	pci_set_drvdata(pdev, NULL)
-
 	/* release memory region */
 	pci_release_regions(pdev);
 
@@ -360,11 +315,234 @@ static void mtk_pci_remove(struct pci_dev *pdev)
 
 static int mtk_pci_suspend(struct pci_dev *pdev, pm_message_t state)
 {
+	struct GLUE_INFO *prGlueInfo = NULL;
+	struct BUS_INFO *prBusInfo;
+	uint32_t count = 0;
+	int wait = 0;
+	struct ADAPTER *prAdapter = NULL;
+	uint8_t drv_own_fail = FALSE;
+	struct ERR_RECOVERY_CTRL_T *prErrRecoveryCtrl;
+	uint32_t u4Status = 0;
+	uint32_t u4Tick;
+
+	DBGLOG(HAL, STATE, "mtk_pci_suspend()\n");
+
+	prGlueInfo = (struct GLUE_INFO *)pci_get_drvdata(pdev);
+	if (!prGlueInfo) {
+		DBGLOG(HAL, ERROR, "pci_get_drvdata fail!\n");
+		return -1;
+	}
+
+	prAdapter = prGlueInfo->prAdapter;
+	prGlueInfo->fgIsInSuspendMode = TRUE;
+	prErrRecoveryCtrl = &prGlueInfo->rHifInfo.rErrRecoveryCtl;
+
+	ACQUIRE_POWER_CONTROL_FROM_PM(prAdapter);
+
+	/* Stop upper layers calling the device hard_start_xmit routine. */
+	netif_tx_stop_all_queues(prGlueInfo->prDevHandler);
+
+#if CFG_ENABLE_WAKE_LOCK
+	prGlueInfo->rHifInfo.eSuspendtate = PCIE_STATE_SUSPEND_ENTERING;
+#endif
+
+	/* wait wiphy device do cfg80211 suspend done, then start hif suspend */
+	if (IS_FEATURE_ENABLED(prGlueInfo->prAdapter->rWifiVar.ucWow))
+		wlanWaitCfg80211SuspendDone(prGlueInfo);
+
+	wlanSuspendPmHandle(prGlueInfo);
+
+#if !CFG_ENABLE_WAKE_LOCK
+	prGlueInfo->rHifInfo.eSuspendtate = PCIE_STATE_PRE_SUSPEND_WAITING;
+#endif
+
+	halPciePreSuspendCmd(prAdapter);
+
+	while (prGlueInfo->rHifInfo.eSuspendtate !=
+		PCIE_STATE_PRE_SUSPEND_DONE) {
+		if (count > 500) {
+			DBGLOG(HAL, ERROR, "pcie pre_suspend timeout\n");
+			return -EAGAIN;
+		}
+		kalMsleep(2);
+		count++;
+	}
+	DBGLOG(HAL, ERROR, "pcie pre_suspend done\n");
+
+	prGlueInfo->rHifInfo.eSuspendtate = PCIE_STATE_SUSPEND;
+
+	/* Polling until HIF side PDMAs are all idle */
+	prBusInfo = prAdapter->chip_info->bus_info;
+	if (prBusInfo->pdmaPollingIdle) {
+		if (prBusInfo->pdmaPollingIdle(prGlueInfo) != TRUE)
+			return -EAGAIN;
+	} else
+		DBGLOG(HAL, ERROR, "PDMA polling idle API didn't register\n");
+
+	/* Disable HIF side PDMA TX/RX */
+	if (prBusInfo->pdmaStop)
+		prBusInfo->pdmaStop(prGlueInfo, TRUE);
+	else
+		DBGLOG(HAL, ERROR, "PDMA config API didn't register\n");
+
+	/* Make sure any pending or on-going L1 reset is done before HIF
+	 * suspend.
+	 */
+	u4Tick = kalGetTimeTick();
+	while (1) {
+		u4Status = prBusInfo->getSoftwareInterrupt ?
+			prBusInfo->getSoftwareInterrupt(prAdapter) : 0;
+		if (((u4Status & ERROR_DETECT_MASK) == 0) &&
+		   (prErrRecoveryCtrl->eErrRecovState == ERR_RECOV_STOP_IDLE)) {
+			DBGLOG(HAL, INFO, "[SER][L1] no pending L1 reset\n");
+			break;
+		}
+
+		kalMsleep(40);
+
+		if (CHECK_FOR_TIMEOUT(kalGetTimeTick(), u4Tick,
+			       MSEC_TO_SYSTIME(WIFI_SER_L1_RST_DONE_TIMEOUT))) {
+
+			DBGLOG(HAL, ERROR,
+			       "[SER][L1] reset timeout before suspend\n");
+			break;
+		}
+	}
+
+	halDisableInterrupt(prAdapter);
+
+	/* FW own */
+	/* Set FW own directly without waiting sleep notify */
+	prAdapter->fgWiFiInSleepyState = TRUE;
+	RECLAIM_POWER_CONTROL_TO_PM(prAdapter, FALSE);
+
+	/* Wait for
+	*  1. The other unfinished ownership handshakes
+	*  2. FW own back
+	*/
+	while (wait < 500) {
+		if ((prAdapter->u4PwrCtrlBlockCnt == 0) &&
+		    (prAdapter->fgIsFwOwn == TRUE) &&
+		    (drv_own_fail == FALSE)) {
+			DBGLOG(HAL, STATE, "*********************\n");
+			DBGLOG(HAL, STATE, "* Enter PCIE Suspend *\n");
+			DBGLOG(HAL, STATE, "*********************\n");
+			DBGLOG(HAL, INFO, "wait = %d\n\n", wait);
+			break;
+		}
+
+		ACQUIRE_POWER_CONTROL_FROM_PM(prAdapter);
+		/* Prevent that suspend without FW Own:
+		 * Set Drv own has failed,
+		 * and then Set FW Own is skipped
+		 */
+		if (prAdapter->fgIsFwOwn == FALSE)
+			drv_own_fail = FALSE;
+		else
+			drv_own_fail = TRUE;
+		/* For single core CPU */
+		/* let hif_thread can be completed */
+		usleep_range(1000, 3000);
+		RECLAIM_POWER_CONTROL_TO_PM(prAdapter, FALSE);
+
+		wait++;
+	}
+
+	if (wait >= 500) {
+		DBGLOG(HAL, ERROR, "Set FW Own Timeout !!\n");
+		return -EAGAIN;
+	}
+
+	pci_save_state(pdev);
+	pci_set_power_state(pdev, pci_choose_state(pdev, state));
+
+	DBGLOG(HAL, STATE, "mtk_pci_suspend() done!\n");
+
+	/* pending cmd will be kept in queue and no one to handle it after HIF resume.
+	 * In STR, it will result in cmd buf full and then cmd buf alloc fail .
+	 */
+	if (IS_FEATURE_ENABLED(prGlueInfo->prAdapter->rWifiVar.ucWow))
+		wlanReleaseAllTxCmdQueue(prGlueInfo->prAdapter);
+
 	return 0;
 }
 
+
 int mtk_pci_resume(struct pci_dev *pdev)
 {
+	struct GLUE_INFO *prGlueInfo = NULL;
+	struct BUS_INFO *prBusInfo;
+	struct CHIP_DBG_OPS *prDebugOps;
+	uint32_t count = 0;
+
+	DBGLOG(HAL, STATE, "mtk_pci_resume()\n");
+
+	prGlueInfo = (struct GLUE_INFO *)pci_get_drvdata(pdev);
+	if (!prGlueInfo) {
+		DBGLOG(HAL, ERROR, "pci_get_drvdata fail!\n");
+		return -1;
+	}
+
+	prBusInfo = prGlueInfo->prAdapter->chip_info->bus_info;
+	prDebugOps = prGlueInfo->prAdapter->chip_info->prDebugOps;
+
+	pci_set_power_state(pdev, PCI_D0);
+	pci_restore_state(pdev);
+
+
+
+	/* Driver own */
+	/* Include restore PDMA settings */
+	ACQUIRE_POWER_CONTROL_FROM_PM(prGlueInfo->prAdapter);
+
+	if (prBusInfo->initPcieInt)
+		prBusInfo->initPcieInt(prGlueInfo);
+
+	halEnableInterrupt(prGlueInfo->prAdapter);
+
+	/* Enable HIF side PDMA TX/RX */
+	if (prBusInfo->pdmaStop)
+		prBusInfo->pdmaStop(prGlueInfo, FALSE);
+	else
+		DBGLOG(HAL, ERROR, "PDMA config API didn't register\n");
+
+	halPcieResumeCmd(prGlueInfo->prAdapter);
+
+	while (prGlueInfo->rHifInfo.eSuspendtate != PCIE_STATE_PRE_RESUME_DONE) {
+		if (count > 500) {
+			DBGLOG(HAL, ERROR, "pre_resume timeout\n");
+
+			if (prDebugOps) {
+				if (prDebugOps->show_mcu_debug_info)
+					prDebugOps->show_mcu_debug_info(prGlueInfo->prAdapter, NULL, 0,
+						DBG_MCU_DBG_ALL, NULL);
+#if (CFG_SUPPORT_DEBUG_SOP == 1)
+				if (prDebugOps->show_debug_sop_info)
+					prDebugOps->show_debug_sop_info(prGlueInfo->prAdapter,
+						SLAVENORESP);
+#endif
+				if (prDebugOps->showCsrInfo)
+					prDebugOps->showCsrInfo(prGlueInfo->prAdapter);
+			}
+
+			break;
+		}
+
+		kalUsleep_range(2000,3000);
+		count++;
+	}
+
+	wlanResumePmHandle(prGlueInfo);
+
+	/* FW own */
+	RECLAIM_POWER_CONTROL_TO_PM(prGlueInfo->prAdapter, FALSE);
+
+	prGlueInfo->fgIsInSuspendMode = FALSE;
+	/* Allow upper layers to call the device hard_start_xmit routine. */
+	netif_tx_wake_all_queues(prGlueInfo->prDevHandler);
+
+	DBGLOG(HAL, STATE, "mtk_pci_resume() done!\n");
+
 	return 0;
 }
 
@@ -447,6 +625,26 @@ void glSetHifInfo(struct GLUE_INFO *prGlueInfo, unsigned long ulCookie)
 
 	prGlueInfo->u4InfType = MT_DEV_INF_PCIE;
 
+	prHif->rErrRecoveryCtl.eErrRecovState = ERR_RECOV_STOP_IDLE;
+	prHif->rErrRecoveryCtl.u4Status = 0;
+
+#if KERNEL_VERSION(4, 15, 0) <= LINUX_VERSION_CODE
+	timer_setup(&prHif->rSerTimer, halHwRecoveryTimeout, 0);
+#else
+	init_timer(&prHif->rSerTimer);
+	prHif->rSerTimer.function = halHwRecoveryTimeout;
+	prHif->rSerTimer.data = (unsigned long)prGlueInfo;
+	prHif->rSerTimer.expires =
+		jiffies + HIF_SER_TIMEOUT * HZ / MSEC_PER_SEC;
+#endif
+
+	INIT_LIST_HEAD(&prHif->rTxCmdQ);
+	INIT_LIST_HEAD(&prHif->rTxDataQ);
+	prHif->u4TxDataQLen = 0;
+
+	prHif->fgIsPowerOff = true;
+	prHif->fgIsDumpLog = false;
+
 	prMemOps->allocTxDesc = pcieAllocDesc;
 	prMemOps->allocRxDesc = pcieAllocDesc;
 	prMemOps->allocTxCmdBuf = NULL;
@@ -457,6 +655,7 @@ void glSetHifInfo(struct GLUE_INFO *prGlueInfo, unsigned long ulCookie)
 	prMemOps->copyEvent = pcieCopyEvent;
 	prMemOps->copyTxData = pcieCopyTxData;
 	prMemOps->copyRxData = pcieCopyRxData;
+	prMemOps->flushCache = NULL;
 	prMemOps->mapTxBuf = pcieMapTxBuf;
 	prMemOps->mapRxBuf = pcieMapRxBuf;
 	prMemOps->unmapTxBuf = pcieUnmapTxBuf;
@@ -479,7 +678,42 @@ void glSetHifInfo(struct GLUE_INFO *prGlueInfo, unsigned long ulCookie)
 /*----------------------------------------------------------------------------*/
 void glClearHifInfo(struct GLUE_INFO *prGlueInfo)
 {
+	struct GL_HIF_INFO *prHifInfo = &prGlueInfo->rHifInfo;
+	struct list_head *prCur, *prNext;
+	struct TX_CMD_REQ *prTxCmdReq;
+	struct TX_DATA_REQ *prTxDataReq;
+
+	del_timer_sync(&prHifInfo->rSerTimer);
+
+	halUninitMsduTokenInfo(prGlueInfo->prAdapter);
+	halWpdmaFreeRing(prGlueInfo);
+
+	list_for_each_safe(prCur, prNext, &prHifInfo->rTxCmdQ) {
+		prTxCmdReq = list_entry(prCur, struct TX_CMD_REQ, list);
+		list_del(prCur);
+		kfree(prTxCmdReq);
+	}
+
+	list_for_each_safe(prCur, prNext, &prHifInfo->rTxDataQ) {
+		prTxDataReq = list_entry(prCur, struct TX_DATA_REQ, list);
+		list_del(prCur);
+		prHifInfo->u4TxDataQLen--;
+	}
 }
+
+/*----------------------------------------------------------------------------*/
+/*!
+* \brief This function reset necessary hif related info when chip reset.
+*
+* \param[in] prGlueInfo Pointer to glue info structure
+*
+* \return (none)
+*/
+/*----------------------------------------------------------------------------*/
+void glResetHifInfo(struct GLUE_INFO *prGlueInfo)
+{
+	ASSERT(prGlueInfo);
+} /* end of glResetHifInfo() */
 
 /*----------------------------------------------------------------------------*/
 /*!
@@ -528,6 +762,18 @@ u_int8_t glBusInit(void *pvData)
 			(unsigned long) pci_resource_start(pdev, 0));
 		goto err_out_free_res;
 	}
+
+#if CFG_CONTROL_ASPM_BY_FW
+#if CFG_SUPPORT_PCIE_ASPM
+	glBusConfigASPM(pdev,
+			DISABLE_ASPM_L1);
+	glBusConfigASPML1SS(pdev,
+		PCI_L1PM_CTR1_ASPM_L12_EN |
+		PCI_L1PM_CTR1_ASPM_L11_EN);
+	glBusConfigASPM(pdev,
+			ENABLE_ASPM_L1);
+#endif
+#endif
 
 	/* Set DMA master */
 	pci_set_master(pdev);
@@ -660,22 +906,11 @@ void glGetHifDev(struct GL_HIF_INFO *prHif, struct device **dev)
 	*dev = &(prHif->pdev->dev);
 }
 
-void glGetChipInfo(void **prChipInfo)
-{
-	struct mt66xx_hif_driver_data *prDriverData;
-
-	prDriverData = get_platform_driver_data();
-	if (!prDriverData)
-		return;
-
-	*prChipInfo = (void *)prDriverData->chip_info;
-}
-
 static void pcieAllocDesc(struct GL_HIF_INFO *prHifInfo,
 			  struct RTMP_DMABUF *prDescRing,
 			  uint32_t u4Num)
 {
-	dma_addr_t rAddr;
+	dma_addr_t rAddr = 0;
 
 	prDescRing->AllocVa = KAL_DMA_ALLOC_COHERENT(
 		prHifInfo->prDmaDev, prDescRing->AllocSize, &rAddr);
@@ -705,9 +940,10 @@ static void *pcieAllocRxBuf(struct GL_HIF_INFO *prHifInfo,
 		return NULL;
 	}
 
-#ifdef CFG_SUPPORT_SNIFFER_RADIOTAP
+#if (CFG_SUPPORT_SNIFFER_RADIOTAP == 1)
 	skb_reserve(pkt, CFG_RADIOTAP_HEADROOM);
 #endif
+
 	prDmaBuf->AllocVa = (void *)pkt->data;
 	memset(prDmaBuf->AllocVa, 0, prDmaBuf->AllocSize);
 
@@ -936,4 +1172,178 @@ void kalRemoveProbe(IN struct GLUE_INFO *prGlueInfo)
 	DBGLOG(INIT, WARN, "[SER][L0] not support...\n");
 }
 #endif
+
+
+#if CFG_SUPPORT_PCIE_ASPM
+static void pcieSetASPML1SS(struct pci_dev *dev, int i4Enable)
+{
+	int pos;
+	uint32_t u4Reg = 0;
+
+	pos = pci_find_ext_capability(dev, PCI_EXT_CAP_ID_L1PMSS);
+
+	if (!pos) {
+		DBGLOG(INIT, INFO, "L1 PM Substate capability is not found!\n");
+		return;
+	}
+
+	pci_read_config_dword(dev, pos + PCI_L1PMSS_CTR1, &u4Reg);
+	u4Reg &= ~PCI_L1PMSS_ENABLE_MASK;
+	u4Reg |= i4Enable;
+	pci_write_config_dword(dev, pos + PCI_L1PMSS_CTR1, u4Reg);
+}
+static void pcieSetASPML1(struct pci_dev *dev, int i4Enable)
+{
+	uint16_t u2Reg = 0;
+	int i4Pos = dev->pcie_cap;
+
+	pci_read_config_word(dev, i4Pos + PCI_EXP_LNKCTL, &u2Reg);
+	u2Reg &= ~PCI_L1PM_ENABLE_MASK;
+	u2Reg |= i4Enable;
+	pci_write_config_word(dev, i4Pos + PCI_EXP_LNKCTL, u2Reg);
+}
+static bool pcieCheckASPML1SS(struct pci_dev *dev, int i4BitMap)
+{
+	int i4Pos;
+	uint32_t u4Reg = 0;
+
+	i4Pos = pci_find_ext_capability(dev, PCI_EXT_CAP_ID_L1PMSS);
+
+	if (!i4Pos) {
+		DBGLOG(INIT, INFO, "L1 PM Substate capability is not found!\n");
+		return FALSE;
+	}
+
+	pci_read_config_dword(dev, i4Pos + PCI_L1PMSS_CAP, &u4Reg);
+	if (i4BitMap != 0) {
+		if ((i4BitMap & PCI_L1PM_CAP_ASPM_L12) &&
+				(!(u4Reg & PCI_L1PM_CAP_ASPM_L12))) {
+			DBGLOG(INIT, INFO, "not support ASPM L1.2!\n");
+			return FALSE;
+		}
+		if ((i4BitMap & PCI_L1PM_CAP_ASPM_L11) &&
+				(!(u4Reg & PCI_L1PM_CAP_ASPM_L11))) {
+			DBGLOG(INIT, INFO, "not support ASPM L1.1!\n");
+			return FALSE;
+		}
+	}
+	return TRUE;
+}
+bool glBusConfigASPM(struct pci_dev *dev, int i4Enable)
+{
+
+	uint32_t u4Reg = 0;
+	struct pci_dev *parent = dev->bus->self;
+	int pos = parent->pcie_cap;
+
+
+	pci_read_config_dword(parent, pos + PCI_EXP_LNKCAP, &u4Reg);
+	if (PCIE_ASPM_CHECK_L1(u4Reg)) {
+		pos = dev->pcie_cap;
+		pci_read_config_dword(dev, pos + PCI_EXP_LNKCAP, &u4Reg);
+		if (PCIE_ASPM_CHECK_L1(u4Reg)) {
+			pcieSetASPML1(parent, i4Enable);
+			pcieSetASPML1(dev, i4Enable);
+			DBGLOG(INIT, INFO, "ASPM STATUS %d\n", i4Enable);
+			return TRUE;
+		}
+	}
+	return FALSE;
+
+}
+bool glBusConfigASPML1SS(struct pci_dev *dev, int i4Enable)
+{
+	struct pci_dev *parent = dev->bus->self;
+
+	if (pcieCheckASPML1SS(parent, i4Enable)) {
+		if (pcieCheckASPML1SS(dev, i4Enable)) {
+			pcieSetASPML1SS(parent, i4Enable);
+			pcieSetASPML1SS(dev, i4Enable);
+			DBGLOG(INIT, INFO, "Config ASPM-L1SS\n");
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+#endif
+
+void halPciePreSuspendCmd(IN struct ADAPTER *prAdapter)
+{
+	struct CMD_HIF_CTRL rCmdHifCtrl;
+	uint32_t rStatus;
+
+	kalMemZero(&rCmdHifCtrl, sizeof(struct CMD_HIF_CTRL));
+
+	rCmdHifCtrl.ucHifType = ENUM_HIF_TYPE_PCIE;
+	rCmdHifCtrl.ucHifDirection = ENUM_HIF_TX;
+	rCmdHifCtrl.ucHifStop = TRUE;
+	rCmdHifCtrl.ucHifSuspend = TRUE;
+	rCmdHifCtrl.u4WakeupHifType = ENUM_CMD_HIF_WAKEUP_TYPE_PCIE;
+
+	rStatus = wlanSendSetQueryCmd(prAdapter,	/* prAdapter */
+			CMD_ID_HIF_CTRL,	/* ucCID */
+			TRUE,	/* fgSetQuery */
+			FALSE,	/* fgNeedResp */
+			FALSE,	/* fgIsOid */
+			NULL,	/* pfCmdDoneHandler */
+			NULL,	/* pfCmdTimeoutHandler */
+			sizeof(struct CMD_HIF_CTRL), /* u4SetQueryInfoLen */
+			(uint8_t *)&rCmdHifCtrl, /* pucInfoBuffer */
+			NULL,	/* pvSetQueryBuffer */
+			0	/* u4SetQueryBufferLen */
+			);
+
+	ASSERT(rStatus == WLAN_STATUS_PENDING);
+}
+
+void halPcieResumeCmd(IN struct ADAPTER *prAdapter)
+{
+	struct CMD_HIF_CTRL rCmdHifCtrl;
+	uint32_t rStatus;
+
+	kalMemZero(&rCmdHifCtrl, sizeof(struct CMD_HIF_CTRL));
+
+	rCmdHifCtrl.ucHifType = ENUM_HIF_TYPE_PCIE;
+	rCmdHifCtrl.ucHifDirection = ENUM_HIF_TX;
+	rCmdHifCtrl.ucHifStop = FALSE;
+	rCmdHifCtrl.ucHifSuspend = FALSE;
+	rCmdHifCtrl.u4WakeupHifType = ENUM_CMD_HIF_WAKEUP_TYPE_PCIE;
+
+	rStatus = wlanSendSetQueryCmd(prAdapter,	/* prAdapter */
+			CMD_ID_HIF_CTRL,	/* ucCID */
+			TRUE,	/* fgSetQuery */
+			FALSE,	/* fgNeedResp */
+			FALSE,	/* fgIsOid */
+			NULL,	/* pfCmdDoneHandler */
+			NULL,	/* pfCmdTimeoutHandler */
+			sizeof(struct CMD_HIF_CTRL), /* u4SetQueryInfoLen */
+			(uint8_t *)&rCmdHifCtrl, /* pucInfoBuffer */
+			NULL,	/* pvSetQueryBuffer */
+			0	/* u4SetQueryBufferLen */
+			);
+
+	ASSERT(rStatus == WLAN_STATUS_PENDING);
+}
+
+void halPciePreSuspendDone(
+	IN struct ADAPTER *prAdapter,
+	IN struct CMD_INFO *prCmdInfo,
+	IN uint8_t *pucEventBuf)
+{
+	ASSERT(prAdapter);
+
+	prAdapter->prGlueInfo->rHifInfo.eSuspendtate =
+		PCIE_STATE_PRE_SUSPEND_DONE;
+}
+
+void halPciePreSuspendTimeout(
+	IN struct ADAPTER *prAdapter,
+	IN struct CMD_INFO *prCmdInfo)
+{
+	ASSERT(prAdapter);
+
+	prAdapter->prGlueInfo->rHifInfo.eSuspendtate =
+		PCIE_STATE_PRE_SUSPEND_FAIL;
+}
 

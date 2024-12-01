@@ -159,6 +159,7 @@ UINT_32 TdlsexLinkMgt(P_ADAPTER_T prAdapter, PVOID pvSetBuffer, UINT_32 u4SetBuf
 	switch (prCmd->ucActionCode) {
 
 	case TDLS_FRM_ACTION_DISCOVERY_REQ:
+		/* printk("\n\n\n  TDLS_FRM_ACTION_DISCOVERY_REQ\n\n\n"); */
 		if (TdlsDataFrameSend_DISCOVERY_REQ(prAdapter,
 						    prStaRec,
 						    prCmd->aucPeer,
@@ -173,6 +174,7 @@ UINT_32 TdlsexLinkMgt(P_ADAPTER_T prAdapter, PVOID pvSetBuffer, UINT_32 u4SetBuf
 		break;
 
 	case TDLS_FRM_ACTION_SETUP_REQ:
+		/* printk("\n\n\n  TDLS_FRM_ACTION_SETUP_REQ\n\n\n"); */
 		prStaRec = cnmGetTdlsPeerByAddress(prAdapter, prAdapter->prAisBssInfo->ucBssIndex, prCmd->aucPeer);
 		g_arTdlsLink[prStaRec->ucTdlsIndex] = 0;
 		if (TdlsDataFrameSend_SETUP_REQ(prAdapter,
@@ -197,6 +199,7 @@ UINT_32 TdlsexLinkMgt(P_ADAPTER_T prAdapter, PVOID pvSetBuffer, UINT_32 u4SetBuf
 		if (prBssInfo->fgTdlsIsProhibited)
 			return 0;
 
+		/* printk("\n\n\n  TDLS_FRM_ACTION_SETUP_RSP\n\n\n"); */
 		if (TdlsDataFrameSend_SETUP_RSP(prAdapter,
 						prStaRec,
 						prCmd->aucPeer,
@@ -211,6 +214,7 @@ UINT_32 TdlsexLinkMgt(P_ADAPTER_T prAdapter, PVOID pvSetBuffer, UINT_32 u4SetBuf
 		break;
 
 	case TDLS_FRM_ACTION_DISCOVERY_RSP:
+		/* printk("\n\n\n  TDLS_FRM_ACTION_DISCOVERY_RSP\n\n\n"); */
 		if (TdlsDataFrameSend_DISCOVERY_RSP(prAdapter,
 						    prStaRec,
 						    prCmd->aucPeer,
@@ -225,6 +229,7 @@ UINT_32 TdlsexLinkMgt(P_ADAPTER_T prAdapter, PVOID pvSetBuffer, UINT_32 u4SetBuf
 		break;
 
 	case TDLS_FRM_ACTION_CONFIRM:
+		/* printk("\n\n\n  TDLS_FRM_ACTION_CONFIRM\n\n\n"); */
 		if (TdlsDataFrameSend_CONFIRM(prAdapter,
 					      prStaRec,
 					      prCmd->aucPeer,
@@ -241,8 +246,10 @@ UINT_32 TdlsexLinkMgt(P_ADAPTER_T prAdapter, PVOID pvSetBuffer, UINT_32 u4SetBuf
 
 		prStaRec = cnmGetTdlsPeerByAddress(prAdapter, prAdapter->prAisBssInfo->ucBssIndex, prCmd->aucPeer);
 		if (prCmd->u2StatusCode == TDLS_REASON_CODE_UNREACHABLE) {
+			/* printk("\n\n\n  u2StatusCode == TDLS_REASON_CODE_UNREACHABLE\n\n\n"); */
 			g_arTdlsLink[prStaRec->ucTdlsIndex] = 0;
 		}
+		/* printk("\n\n\n  TDLS_FRM_ACTION_TEARDOWN\n\n\n"); */
 		if (TdlsDataFrameSend_TearDown(prAdapter,
 					       prStaRec,
 					       prCmd->aucPeer,
@@ -251,11 +258,13 @@ UINT_32 TdlsexLinkMgt(P_ADAPTER_T prAdapter, PVOID pvSetBuffer, UINT_32 u4SetBuf
 					       prCmd->u2StatusCode,
 					       (UINT_8 *) (prCmd->aucSecBuf),
 					       prCmd->u4SecBufLen) != TDLS_STATUS_SUCCESS) {
+			/* printk("\n teardown frrame  send failure\n"); */
 			return -1;
 		}
 		break;
 
 	default:
+		/* printk("\n\n\n  default\n\n\n"); */
 		return -EINVAL;
 	}
 
@@ -304,11 +313,13 @@ UINT_32 TdlsexLinkOper(P_ADAPTER_T prAdapter, PVOID pvSetBuffer, UINT_32 u4SetBu
 			}
 		}
 
+		/* printk("TDLS_ENABLE_LINK %d\n", i); */
 		break;
 	case TDLS_DISABLE_LINK:
 
 		prStaRec = cnmGetTdlsPeerByAddress(prAdapter, prAdapter->prAisBssInfo->ucBssIndex, prCmd->aucPeerMac);
 
+		/* printk("TDLS_ENABLE_LINK %d\n", prStaRec->ucTdlsIndex); */
 		g_arTdlsLink[prStaRec->ucTdlsIndex] = 0;
 		if (IS_DLS_STA(prStaRec))
 			cnmStaRecFree(prAdapter, prStaRec);
@@ -491,6 +502,7 @@ TdlsDataFrameSend_TearDown(ADAPTER_T *prAdapter,
 
 	ReasonCode = u2StatusCode;
 
+	/* printk("\n\n ReasonCode = %u\n\n",ReasonCode ); */
 
 	kalMemCopy(pPkt, &ReasonCode, 2);
 	pPkt = pPkt + 2;
@@ -533,6 +545,7 @@ TdlsDataFrameSend_TearDown(ADAPTER_T *prAdapter,
 	/* g_arTdlsLink[prStaRec->ucTdlsIndex] = FALSE; */
 	/* } */
 
+	/* printk(" TdlsDataFrameSend_TearDown !!\n"); */
 
 	/* 5. send the data frame */
 	wlanHardStartXmit(prMsduInfo, prMsduInfo->dev);
@@ -743,16 +756,11 @@ TdlsDataFrameSend_SETUP_REQ(ADAPTER_T *prAdapter,
 		LR_TDLS_FME_FIELD_FILL(u4IeLen);
 	}
 #if CFG_SUPPORT_802_11AC
-	if (prAdapter->fgIsHwACDisabled == 0) {
-
-		if (prAdapter->rWifiVar.ucAvailablePhyTypeSet &
-					PHY_TYPE_SET_802_11AC) {
-			/* Add VHT IE *//* try to reuse p2p path */
-			u4IeLen = rlmFillVhtCapIEByAdapter(prAdapter,
-						prBssInfo, pPkt);
-			pPkt += u4IeLen;
-			u4PktLen += u4IeLen;
-		}
+	if (prAdapter->rWifiVar.ucAvailablePhyTypeSet & PHY_TYPE_SET_802_11AC) {
+		/* Add VHT IE *//* try to reuse p2p path */
+		u4IeLen = rlmFillVhtCapIEByAdapter(prAdapter, prBssInfo, pPkt);
+		pPkt += u4IeLen;
+		u4PktLen += u4IeLen;
 	}
 #endif
 
@@ -920,8 +928,7 @@ TdlsDataFrameSend_SETUP_RSP(ADAPTER_T *prAdapter,
 
 	if (pAppendIe != NULL) {
 		if ((ucActionCode != TDLS_FRM_ACTION_TEARDOWN) ||
-		    ((ucActionCode == TDLS_FRM_ACTION_TEARDOWN) &&
-		     (prStaRec != NULL))) {
+		    ((ucActionCode == TDLS_FRM_ACTION_TEARDOWN))) {
 			kalMemCopy(pPkt, pAppendIe, AppendIeLen);
 			LR_TDLS_FME_FIELD_FILL(AppendIeLen);
 		}
@@ -963,16 +970,11 @@ TdlsDataFrameSend_SETUP_RSP(ADAPTER_T *prAdapter,
 		LR_TDLS_FME_FIELD_FILL(u4IeLen);
 	}
 #if CFG_SUPPORT_802_11AC
-	if (prAdapter->fgIsHwACDisabled == 0) {
-
-		if (prAdapter->rWifiVar.ucAvailablePhyTypeSet &
-					PHY_TYPE_SET_802_11AC) {
-			/* Add VHT IE *//* try to reuse p2p path */
-			u4IeLen = rlmFillVhtCapIEByAdapter(prAdapter,
-						prBssInfo, pPkt);
-			pPkt += u4IeLen;
-			u4PktLen += u4IeLen;
-		}
+	if (prAdapter->rWifiVar.ucAvailablePhyTypeSet & PHY_TYPE_SET_802_11AC) {
+		/* Add VHT IE *//* try to reuse p2p path */
+		u4IeLen = rlmFillVhtCapIEByAdapter(prAdapter, prBssInfo, pPkt);
+		pPkt += u4IeLen;
+		u4PktLen += u4IeLen;
 	}
 #endif
 
@@ -1649,16 +1651,11 @@ TdlsDataFrameSend_DISCOVERY_RSP(ADAPTER_T *prAdapter,
 		LR_TDLS_FME_FIELD_FILL(u4IeLen);
 	}
 #if CFG_SUPPORT_802_11AC
-	if (prAdapter->fgIsHwACDisabled == 0) {
-
-		if (prAdapter->rWifiVar.ucAvailablePhyTypeSet &
-						PHY_TYPE_SET_802_11AC) {
-			/* Add VHT IE *//* try to reuse p2p path */
-			u4IeLen = rlmFillVhtCapIEByAdapter(prAdapter,
-						prBssInfo, pPkt);
-			pPkt += u4IeLen;
-			u4PktLen += u4IeLen;
-		}
+	if (prAdapter->rWifiVar.ucAvailablePhyTypeSet & PHY_TYPE_SET_802_11AC) {
+		/* Add VHT IE *//* try to reuse p2p path */
+		u4IeLen = rlmFillVhtCapIEByAdapter(prAdapter, prBssInfo, pPkt);
+		pPkt += u4IeLen;
+		u4PktLen += u4IeLen;
 	}
 #endif
 

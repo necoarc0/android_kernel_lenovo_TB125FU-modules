@@ -1,15 +1,8 @@
-/* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2005 MediaTek Inc.
+ */
 
-/*
- * Copyright (c) 2020 MediaTek Inc.
- */
-/*
- * SHA1 hash implementation and interface functions
- * Copyright (c) 2003-2005, Jouni Malinen <j@w1.fi>
- *
- * This software may be distributed under the terms of the BSD license.
- * See README for more details.
- */
 
 #include "wpa_supp/FourWayHandShake.h"
 
@@ -195,8 +188,6 @@ SHA1Transform(u32 state[5], const unsigned char buffer[64]) {
 	union CHAR64LONG16 *block;
 #ifdef SHA1HANDSOFF
 	union CHAR64LONG16 workspace;
-
-	os_memset(&workspace, 0, 64);
 
 	block = &workspace;
 	os_memcpy(block, buffer, 64);

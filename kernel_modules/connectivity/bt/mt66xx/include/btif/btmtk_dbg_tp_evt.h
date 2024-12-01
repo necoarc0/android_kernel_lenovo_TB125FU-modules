@@ -76,3 +76,4 @@ TRACE_EVENT(bt_evt,
 #define TRACE_INCLUDE_FILE btmtk_dbg_tp_evt
 #include <trace/define_trace.h>
 
+

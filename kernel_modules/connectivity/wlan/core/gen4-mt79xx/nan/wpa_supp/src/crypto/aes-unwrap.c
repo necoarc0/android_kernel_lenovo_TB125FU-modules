@@ -1,15 +1,6 @@
-/* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
-
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2020 MediaTek Inc.
- */
-/*
- * AES key unwrap (RFC3394)
- *
- * Copyright (c) 2003-2007, Jouni Malinen <j@w1.fi>
- *
- * This software may be distributed under the terms of the BSD license.
- * See README for more details.
+ * Copyright (c) 2021 MediaTek Inc.
  */
 
 #include "wpa_supp/FourWayHandShake.h"
@@ -35,8 +26,6 @@ aes_unwrap_supp(const u8 *kek, size_t kek_len, int n, const u8 *cipher,
 	int i, j;
 	void *ctx;
 	unsigned int t;
-
-	os_memset(a, 0, sizeof(a));
 
 	/* 1) Initialize variables. */
 	os_memcpy(a, cipher, 8);

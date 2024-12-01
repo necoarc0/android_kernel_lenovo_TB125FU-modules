@@ -208,7 +208,6 @@ static BOOLEAN roamingFsmIsNeedScan(IN P_ADAPTER_T prAdapter)
 	BOOLEAN fgIsNeedScan = FALSE;
 	BOOLEAN fgIsRoamingSSID = FALSE;
 
-	kalMemZero(&rCmdSwCtrl, sizeof(rCmdSwCtrl));
 	prAisBssInfo = prAdapter->prAisBssInfo;
 	prScanInfo = &(prAdapter->rWifiVar.rScanInfo);
 	prRoamBSSDescList = &prScanInfo->rRoamBSSDescList;
@@ -503,7 +502,6 @@ VOID roamingFsmRunEventRoam(IN P_ADAPTER_T prAdapter)
 		return;
 
 	eNextState = ROAMING_STATE_ROAM;
-	kalMemZero(&rTransit, sizeof(rTransit));
 	/* DISCOVERY -> ROAM */
 	if (eNextState != prRoamingFsmInfo->eCurrentState) {
 		rTransit.u2Event = ROAMING_EVENT_ROAM;
@@ -583,7 +581,6 @@ VOID roamingFsmRunEventAbort(IN P_ADAPTER_T prAdapter)
 	DBGLOG(ROAMING, TRACE, "EVENT-ROAMING ABORT: Current Time = %u\n", kalGetTimeTick());
 
 	eNextState = ROAMING_STATE_IDLE;
-	kalMemZero(&rTransit, sizeof(rTransit));
 	/* IDLE, DECISION, DISCOVERY, ROAM -> IDLE */
 	if (eNextState != prRoamingFsmInfo->eCurrentState) {
 		rTransit.u2Event = ROAMING_EVENT_ABORT;

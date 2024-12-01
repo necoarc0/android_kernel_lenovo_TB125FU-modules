@@ -1,54 +1,7 @@
-/******************************************************************************
- *
- * This file is provided under a dual license.  When you use or
- * distribute this software, you may choose to be licensed under
- * version 2 of the GNU General Public License ("GPLv2 License")
- * or BSD License.
- *
- * GPLv2 License
- *
- * Copyright(C) 2016 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * BSD LICENSE
- *
- * Copyright(C) 2016 MediaTek Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2016 MediaTek Inc.
+ */
 
 /*! \file   "nic_rate.c"
  *    \brief  This file contains the transmission rate handling routines.
@@ -170,9 +123,7 @@ const uint16_t au2RateVHT[VHT_RATE_NUM] = {
 	RATE_VHT_MCS_6,		/* RATE_MCS6_INDEX, */
 	RATE_VHT_MCS_7,		/* RATE_MCS7_INDEX, */
 	RATE_VHT_MCS_8,		/* RATE_MCS8_INDEX, */
-	RATE_VHT_MCS_9,		/* RATE_MCS9_INDEX, */
-	RATE_VHT_MCS_10,	/* RATE_MCS10_INDEX, */
-	RATE_VHT_MCS_11,	/* RATE_MCS11_INDEX, */
+	RATE_VHT_MCS_9		/* RATE_MCS9_INDEX, */
 };
 
 /* in unit of 100kb/s */
@@ -190,10 +141,6 @@ const struct EMU_MAC_RATE_INFO arMcsRate2PhyRate[] = {
 	RATE_INFO(PHY_RATE_MCS7, 650, 722, 1350, 1500, 2925, 3250, 5850, 6500),
 	RATE_INFO(PHY_RATE_MCS8, 780, 867, 1620, 1800, 3510, 3900, 7020, 7800),
 	RATE_INFO(PHY_RATE_MCS9, 867, 963, 1800, 2000, 3900, 4333, 7800, 8667),
-	RATE_INFO(PHY_RATE_MCS10,
-		975, 1083, 2025, 2250, 4388, 4875, 8775, 9750),
-	RATE_INFO(PHY_RATE_MCS11,
-		1083, 1204, 2250, 2500, 4875, 5417, 9750, 10833),
 	RATE_INFO(PHY_RATE_MCS32, 0, 0, 60, 67, 0, 0, 0, 0)
 };
 
@@ -255,34 +202,13 @@ char *HW_TX_RATE_BW[] = {"BW20", "BW40", "BW80", "BW160/BW8080", "N/A"};
  *                              F U N C T I O N S
  *******************************************************************************
  */
-/**
- * nicGetPhyRateByMcsRate() - Get PHY rate from MCS rate
- * @ucIdx: MCS index.
- * @ucBw: Bandwodth.
- * @ucGI: GI value.
- *
- * This function called by TX or RX to get the PHY rate from MCS index.
- * In the case of 11n(RX_VT_MIXED_MODE) 2x2, the MCS index shall be adjusted
- * before query, and the result shall multiply by 2.
- *
- * Return: Mapped PHY rate.
- */
-
 uint32_t
 nicGetPhyRateByMcsRate(
 	IN uint8_t ucIdx,
 	IN uint8_t ucBw,
 	IN uint8_t ucGI)
 {
-	if (ARRAY_SIZE(arMcsRate2PhyRate) <= ucIdx ||
-			ucBw > RX_VT_FR_MODE_160 ||
-			ucGI > MAC_GI_SHORT) {
-		DBGLOG(RX, WARN, "Invalid McsRate: ucIdx=%u, ucBw=%u, ucGI=%u",
-				ucIdx, ucBw, ucGI);
-		return 0;
-	}
-
-	return arMcsRate2PhyRate[ucIdx].u4PhyRate[ucBw][ucGI];
+	return	arMcsRate2PhyRate[ucIdx].u4PhyRate[ucBw][ucGI];
 }
 
 uint32_t
@@ -374,21 +300,24 @@ nicRateCode2PhyRate(
 	u2TxMode = u2RateCode & RATE_TX_MODE_MASK;
 	ucRateNss = ucRateNss + AR_SS_1; /* change to be base=1 */
 
-	if (u2TxMode == TX_MODE_HT_GF || u2TxMode == TX_MODE_HT_MM) {
+	if ((u2TxMode == TX_MODE_HT_GF)
+	    || (u2TxMode == TX_MODE_HT_MM)) {
 
 		if (ucPhyRate > PHY_RATE_MCS7)
-			u2RateCode %= 8;
+			u2RateCode = u2RateCode - HT_RATE_MCS7_INDEX;
 		else
 			ucRateNss = AR_SS_1;
 
-	} else if (u2TxMode == TX_MODE_OFDM || u2TxMode == TX_MODE_CCK) {
+	} else if ((u2TxMode == TX_MODE_OFDM)
+		   || (u2TxMode == TX_MODE_CCK)) {
 		ucRateNss = AR_SS_1;
 	}
 	DBGLOG(NIC, LOUD,
 	       "Coex:nicRateCode2PhyRate,RC:%x,B:%d,I:%d\n",
 	       u2RateCode, ucBandwidth, ucGI);
 
-	u4PhyRateBy1SS = nicRateCode2DataRate(u2RateCode, ucBandwidth, ucGI);
+	u4PhyRateBy1SS = nicRateCode2DataRate(u2RateCode,
+					      ucBandwidth, ucGI);
 	u4PhyRateIn100Kbps = u4PhyRateBy1SS * ucRateNss;
 
 	DBGLOG(NIC, LOUD,
@@ -559,27 +488,12 @@ uint32_t nicSetFixedRateData(
 	uint32_t u4Data = 0;
 	uint8_t u4Nsts = 1;
 	uint8_t u1FormatVer;
-	uint8_t u1TxModeMcsNumMax[ENUM_TX_MODE_NUM];
-
-	kalMemZero(u1TxModeMcsNumMax, ENUM_TX_MODE_NUM);
-	/* u1TxModeMcsNumMax[ENUM_TX_MODE_NUM] = {4, 8, 33, 33, 10}; */
-	u1TxModeMcsNumMax[ENUM_TX_MODE_CCK] = 4;
-	u1TxModeMcsNumMax[ENUM_TX_MODE_OFDM] = 8;
-	u1TxModeMcsNumMax[ENUM_TX_MODE_MM] = 33;
-	u1TxModeMcsNumMax[ENUM_TX_MODE_GF] = 33;
-	u1TxModeMcsNumMax[ENUM_TX_MODE_VHT] = 10;
-
+	uint8_t u1TxModeMcsNumMax[ENUM_TX_MODE_NUM]
+		= {4, 8, 33, 33, 10
 #if (CFG_SUPPORT_802_11AX == 1)
-	if (fgEfuseCtrlAxOn == 1) {
-	/* u1TxModeMcsNumMax[ENUM_TX_MODE_NUM] */
-		/* = {4, 8, 33, 33, 10, 2, 0, 0, 12, 12, 12, 12}; */
-		u1TxModeMcsNumMax[ENUM_TX_MODE_PLR] = 2;
-		u1TxModeMcsNumMax[ENUM_TX_MODE_HE_SU] = 12;
-		u1TxModeMcsNumMax[ENUM_TX_MODE_HE_ER] = 12;
-		u1TxModeMcsNumMax[ENUM_TX_MODE_HE_TRIG] = 12;
-		u1TxModeMcsNumMax[ENUM_TX_MODE_HE_MU] = 12;
-	}
+		, 2, 0, 0, 12, 12, 12, 12
 #endif
+		};
 
 	u4Data |= RA_FIXEDRATE;
 
@@ -736,12 +650,12 @@ uint32_t nicSetFixedRateData(
 			RA_FIXEDRATE_FIELD_HE_LTF_OFFSET)
 			& RA_FIXEDRATE_FIELD_HE_LTF_MASK);
 
-		if (pFixedRate->u4Mode == TX_RATE_MODE_HE_ER) {
-			if (pFixedRate->u4HeErDCM)
-				u4Data |= RA_FIXEDRATE_FIELD_HE_ER_DCM;
+		if (pFixedRate->u4HeErDCM)
+			u4Data |= BIT(RA_FIXEDRATE_FIELD_HE_ER_DCM);
+
+		if (pFixedRate->u4Mode == TX_RATE_MODE_HE_ER)
 			if (pFixedRate->u4HeEr106t)
-				u4Data |= RA_FIXEDRATE_FIELD_HE_ER_106;
-		}
+				u4Data |= BIT(RA_FIXEDRATE_FIELD_HE_ER_106);
 	}
 
 	*pu4Data = u4Data;
@@ -825,17 +739,29 @@ uint8_t nicGetTxSgiInfo(
 }
 
 uint8_t nicGetTxLdpcInfo(
+	IN uint8_t ucTxMode,
 	IN struct PARAM_TX_CONFIG *prWtblTxConfig)
 {
 	if (!prWtblTxConfig)
-		return FALSE;
+		return 0;
 
-	if (prWtblTxConfig->fgIsHE)
-		return prWtblTxConfig->fgHeLDPC;
-	else if (prWtblTxConfig->fgIsVHT)
-		return prWtblTxConfig->fgVhtLDPC;
-	else
+	switch (ucTxMode) {
+	case ENUM_TX_MODE_MM:
+	case ENUM_TX_MODE_GF:
 		return prWtblTxConfig->fgLDPC;
+	case ENUM_TX_MODE_VHT:
+		return prWtblTxConfig->fgVhtLDPC;
+#if (CFG_SUPPORT_802_11AX == 1)
+	case ENUM_TX_MODE_HE_SU:
+	case ENUM_TX_MODE_HE_ER:
+	case ENUM_TX_MODE_HE_MU:
+		return prWtblTxConfig->fgHeLDPC;
+#endif
+	case ENUM_TX_MODE_CCK:
+	case ENUM_TX_MODE_OFDM:
+	default:
+		return 0;
+	}
 }
 
 uint16_t nicGetStatIdxInfo(IN struct ADAPTER *prAdapter,
@@ -897,6 +823,9 @@ int32_t nicGetTxRateInfo(IN char *pcCommand, IN int i4TotalLen,
 	uint8_t i, txmode, rate, stbc, sgi;
 	uint8_t nsts;
 	int32_t i4BytesWritten = 0;
+#if (CFG_SUPPORT_CONNAC2X == 1)
+	uint8_t dcm, ersu106t;
+#endif
 
 	for (i = 0; i < AUTO_RATE_NUM; i++) {
 		txmode = HW_TX_RATE_TO_MODE(
@@ -910,6 +839,17 @@ int32_t nicGetTxRateInfo(IN char *pcCommand, IN int i4TotalLen,
 		stbc = HW_TX_RATE_TO_STBC(
 			prHwWlanInfo->rWtblRateInfo.au2RateCode[i]);
 		sgi = nicGetTxSgiInfo(&prHwWlanInfo->rWtblPeerCap, txmode);
+#if (CFG_SUPPORT_CONNAC2X == 1)
+		dcm = HW_TX_RATE_TO_DCM(
+			prHwWlanInfo->rWtblRateInfo.au2RateCode[i]);
+		ersu106t = HW_TX_RATE_TO_106T(
+			prHwWlanInfo->rWtblRateInfo.au2RateCode[i]);
+
+		if (dcm)
+			rate = CONNAC2X_HW_TX_RATE_UNMASK_DCM(rate);
+		if (ersu106t)
+			rate = CONNAC2X_HW_TX_RATE_UNMASK_106T(rate);
+#endif
 
 		if (fgDumpAll) {
 			i4BytesWritten += kalScnprintf(
@@ -1014,35 +954,35 @@ int32_t nicGetTxRateInfo(IN char *pcCommand, IN int i4TotalLen,
 				"%s, ", rate < 4 ? "LP" : "SP");
 		else if (txmode == TX_RATE_MODE_OFDM)
 			;
-		else if (
-#if CFG_SUPPORT_802_11AX == 1
-			 txmode == TX_RATE_MODE_PLR ||
-#endif
-			 txmode == TX_RATE_MODE_HTMIX ||
-			 txmode == TX_RATE_MODE_HTGF ||
-			 txmode == TX_RATE_MODE_VHT)
+		else if ((txmode == TX_RATE_MODE_HTMIX) ||
+			 (txmode == TX_RATE_MODE_HTGF) ||
+			 (txmode == TX_RATE_MODE_VHT) ||
+			 (txmode == TX_RATE_MODE_PLR))
 			i4BytesWritten += kalScnprintf(
 				pcCommand + i4BytesWritten,
 				i4TotalLen - i4BytesWritten,
 				"%s, ", sgi == 0 ? "LGI" : "SGI");
-#if CFG_SUPPORT_802_11AX == 1 || CFG_SUPPORT_802_11BE == 1
 		else
 			i4BytesWritten += kalScnprintf(
 				pcCommand + i4BytesWritten,
 				i4TotalLen - i4BytesWritten,
 				"%s, ", sgi == 0 ? "SGI" :
 				(sgi == 1 ? "MGI" : "LGI"));
-#endif
 
 		if (prQueryStaStatistics->ucSkipAr) {
 			i4BytesWritten += kalScnprintf(
 				pcCommand + i4BytesWritten,
 				i4TotalLen - i4BytesWritten,
-				"%s%s%s\n",
+				"%s%s%s%s%s\n",
 				txmode <= ENUM_TX_MODE_NUM ?
 				    HW_TX_MODE_STR[txmode] : "N/A",
+#if (CFG_SUPPORT_CONNAC2X == 1)
+				dcm ? ", DCM" : "", ersu106t ? ", 106t" : "",
+#else
+				"", "",
+#endif
 				stbc ? ", STBC, " : ", ",
-				nicGetTxLdpcInfo(
+				nicGetTxLdpcInfo(txmode,
 				    &prHwWlanInfo->rWtblTxConfig) == 0 ?
 				    "BCC" : "LDPC");
 		} else {
@@ -1056,7 +996,7 @@ int32_t nicGetTxRateInfo(IN char *pcCommand, IN int i4TotalLen,
 					txmode < ENUM_TX_MODE_NUM ?
 					    HW_TX_MODE_STR[txmode] : "N/A",
 					stbc ? ", STBC, " : ", ",
-					((nicGetTxLdpcInfo(
+					((nicGetTxLdpcInfo(txmode,
 					    &prHwWlanInfo->rWtblTxConfig) == 0)
 					    || (txmode == TX_RATE_MODE_CCK)
 					    || (txmode == TX_RATE_MODE_OFDM)) ?
@@ -1069,7 +1009,7 @@ int32_t nicGetTxRateInfo(IN char *pcCommand, IN int i4TotalLen,
 					txmode < ENUM_TX_MODE_NUM ?
 					    HW_TX_MODE_STR[txmode] : "N/A",
 					stbc ? ", STBC, " : ", ",
-					((nicGetTxLdpcInfo(
+					((nicGetTxLdpcInfo(txmode,
 					    &prHwWlanInfo->rWtblTxConfig) == 0)
 					    || (txmode == TX_RATE_MODE_CCK)
 					    || (txmode == TX_RATE_MODE_OFDM))
@@ -1081,11 +1021,16 @@ int32_t nicGetTxRateInfo(IN char *pcCommand, IN int i4TotalLen,
 			i4BytesWritten += kalScnprintf(
 				pcCommand + i4BytesWritten,
 				i4TotalLen - i4BytesWritten,
-				"%s%s%s\n",
+				"%s%s%s%s%s\n",
 				txmode < ENUM_TX_MODE_NUM ?
 				    HW_TX_MODE_STR[txmode] : "N/A",
+#if (CFG_SUPPORT_CONNAC2X == 1)
+				dcm ? ", DCM" : "", ersu106t ? ", 106t" : "",
+#else
+				"", "",
+#endif
 				stbc ? ", STBC, " : ", ",
-				((nicGetTxLdpcInfo(
+				((nicGetTxLdpcInfo(txmode,
 				    &prHwWlanInfo->rWtblTxConfig) == 0) ||
 				    (txmode == TX_RATE_MODE_CCK) ||
 				    (txmode == TX_RATE_MODE_OFDM)) ?
@@ -1207,4 +1152,17 @@ int32_t nicGetRxRateInfo(struct ADAPTER *prAdapter, IN char *pcCommand,
 	return i4BytesWritten;
 }
 
+uint16_t nicRateInfo2RateCode(IN uint32_t  u4TxMode,
+	IN uint32_t  u4Rate)
+{
+	uint16_t u2RateCode = 0;
+
+	if (u4TxMode < 5) {
+		u2RateCode |= (u4TxMode << 6);
+		u2RateCode |= u4Rate;
+	} else
+		return -1;
+
+	return u2RateCode;
+}
 

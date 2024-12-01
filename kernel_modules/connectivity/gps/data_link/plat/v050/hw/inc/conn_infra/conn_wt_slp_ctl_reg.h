@@ -23,3 +23,4 @@
 #define CONN_WT_SLP_CTL_REG_WB_GPS_CTL_GPS_HW_MODE_EN_SHFT     0
 
 #endif /* __CONN_WT_SLP_CTL_REG_REGS_H__ */
+

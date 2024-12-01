@@ -344,11 +344,6 @@ VOID aaaFsmRunEventRxAuth(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfb)
 						return;
 					}
 #endif
-				} else if (authFloodingCheck(
-						prAdapter,
-						prBssInfo,
-						prSwRfb) == FALSE) {
-					return;
 				} else {
 					fgReplyAuth = TRUE;
 				}
@@ -437,9 +432,7 @@ bow_proc:
 #endif
 		} else {
 			/* NOTE(Kevin): We should have STA_RECORD_T if the status code was successful */
-			ASSERT((u2StatusCode != STATUS_CODE_SUCCESSFUL) &&
-				(u2StatusCode != WLAN_STATUS_SAE_HASH_TO_ELEMENT));
-			return;
+			ASSERT(!(u2StatusCode == STATUS_CODE_SUCCESSFUL));
 		}
 
 		/* NOTE: Ignore the return status for AAA */
@@ -458,21 +451,6 @@ bow_proc:
 				prSwRfb,
 				FALSE,
 				(uint8_t)prBssInfo->u4PrivateData);
-			if (prStaRec && prStaRec->fgIsInUse == TRUE) {
-				cnmTimerStopTimer(prAdapter,
-					&prStaRec->rTxReqDoneOrRxRespTimer);
-
-				cnmTimerInitTimer(prAdapter,
-					&prStaRec->rTxReqDoneOrRxRespTimer,
-					(PFN_MGMT_TIMEOUT_FUNC)
-					aaaFsmRunEventTxReqTimeOut,
-					(ULONG) prStaRec);
-
-				cnmTimerStartTimer(prAdapter,
-					&prStaRec->rTxReqDoneOrRxRespTimer,
-					TU_TO_MSEC(
-					DOT11_RSNA_SAE_RETRANS_PERIOD_TU));
-			}
 			return;
 		} else {
 #endif

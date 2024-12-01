@@ -71,3 +71,4 @@
 #define CONN_PTA6_GPS_BLANK_CFG_r_gps_blank_src_SHFT           0
 
 #endif /* __CONN_PTA_REGS_H__ */
+

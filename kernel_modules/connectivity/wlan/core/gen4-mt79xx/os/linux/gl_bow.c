@@ -1,54 +1,7 @@
-/******************************************************************************
- *
- * This file is provided under a dual license.  When you use or
- * distribute this software, you may choose to be licensed under
- * version 2 of the GNU General Public License ("GPLv2 License")
- * or BSD License.
- *
- * GPLv2 License
- *
- * Copyright(C) 2016 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * BSD LICENSE
- *
- * Copyright(C) 2016 MediaTek Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2016 MediaTek Inc.
+ */
 /*
 ** Id: @(#) gl_bow.c@@
 */
@@ -292,8 +245,7 @@ static ssize_t bow_ampc_read(IN struct file *filp, IN char __user *buf, IN size_
 
 	DBGLOG(BOW, INFO, "BoW EVENT read.\n");
 
-	if ((prGlueInfo->rBowInfo.fgIsRegistered == FALSE) ||
-		test_bit(GLUE_FLAG_HALT_BIT, &prGlueInfo->ulFlag))
+	if ((prGlueInfo->rBowInfo.fgIsRegistered == FALSE) || (prGlueInfo->ulFlag & GLUE_FLAG_HALT))
 		return -EFAULT;
 	/* size check */
 /* if(kfifo_len(prGlueInfo->rBowInfo.prKfifo) >= size) */
@@ -335,8 +287,7 @@ static ssize_t bow_ampc_write(IN struct file *filp, OUT const char __user *buf, 
 	prGlueInfo = (struct GLUE_INFO *) (filp->private_data);
 	ASSERT(prGlueInfo);
 
-	if ((prGlueInfo->rBowInfo.fgIsRegistered == FALSE) ||
-		test_bit(GLUE_FLAG_HALT_BIT, &prGlueInfo->ulFlag))
+	if ((prGlueInfo->rBowInfo.fgIsRegistered == FALSE) || (prGlueInfo->ulFlag & GLUE_FLAG_HALT))
 		return -EFAULT;
 
 	if (size > MAX_BUFFER_SIZE)
@@ -389,8 +340,7 @@ static long bow_ampc_ioctl(IN struct file *filp, IN unsigned int cmd, IN OUT uns
 
 	ASSERT(prGlueInfo);
 
-	if ((prGlueInfo->rBowInfo.fgIsRegistered == FALSE) ||
-		test_bit(GLUE_FLAG_HALT_BIT, &prGlueInfo->ulFlag))
+	if ((prGlueInfo->rBowInfo.fgIsRegistered == FALSE) || (prGlueInfo->ulFlag & GLUE_FLAG_HALT))
 		return -EFAULT;
 	/* permission check */
 	if (_IOC_DIR(cmd) & _IOC_READ)
@@ -423,8 +373,7 @@ static unsigned int bow_ampc_poll(IN struct file *filp, IN poll_table * wait)
 
 	ASSERT(prGlueInfo);
 
-	if ((prGlueInfo->rBowInfo.fgIsRegistered == FALSE) ||
-		test_bit(GLUE_FLAG_HALT_BIT, &prGlueInfo->ulFlag))
+	if ((prGlueInfo->rBowInfo.fgIsRegistered == FALSE) || (prGlueInfo->ulFlag & GLUE_FLAG_HALT))
 		return -EFAULT;
 
 	poll_wait(filp, &prGlueInfo->rBowInfo.outq, wait);
@@ -515,8 +464,7 @@ void kalIndicateBOWEvent(IN struct GLUE_INFO *prGlueInfo, IN struct BT_OVER_WIFI
 	ASSERT(prEvent);
 
 	/* check device */
-	if ((prGlueInfo->rBowInfo.fgIsRegistered == FALSE) ||
-		test_bit(GLUE_FLAG_HALT_BIT, &prGlueInfo->ulFlag))
+	if ((prGlueInfo->rBowInfo.fgIsRegistered == FALSE) || (prGlueInfo->ulFlag & GLUE_FLAG_HALT))
 		return;
 #if 0
 	u4AvailSize = GLUE_BOW_KFIFO_DEPTH - kfifo_len(prGlueInfo->rBowInfo.prKfifo);
@@ -908,8 +856,7 @@ static int bowStop(IN struct net_device *prDev)
  * \retval NETDEV_TX_BUSY - on failure, packet will be discarded by upper layer.
  */
 /*----------------------------------------------------------------------------*/
-static netdev_tx_t bowHardStartXmit(IN struct sk_buff *prSkb,
-		IN struct net_device *prDev)
+static int bowHardStartXmit(IN struct sk_buff *prSkb, IN struct net_device *prDev)
 {
 	struct GLUE_INFO *prGlueInfo = *((struct GLUE_INFO **) netdev_priv(prDev));
 
@@ -993,8 +940,7 @@ static netdev_tx_t bowHardStartXmit(IN struct sk_buff *prSkb,
  * \retval NETDEV_TX_BUSY - on failure, packet will be discarded by upper layer.
  */
 /*----------------------------------------------------------------------------*/
-static netdev_tx_t bowHardStartXmit(IN struct sk_buff *prSkb,
-		IN struct net_device *prDev)
+static netdev_tx_t bowHardStartXmit(IN struct sk_buff *prSkb, IN struct net_device *prDev)
 {
 	struct NETDEV_PRIVATE_GLUE_INFO *prNetDevPrivate = (struct NETDEV_PRIVATE_GLUE_INFO *) NULL;
 	struct GLUE_INFO *prGlueInfo = NULL;

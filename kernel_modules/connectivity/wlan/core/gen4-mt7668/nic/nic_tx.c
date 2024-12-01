@@ -1068,14 +1068,8 @@ nicTxComposeDesc(IN P_ADAPTER_T prAdapter, IN P_MSDU_INFO_T prMsduInfo,
 	HAL_MAC_TX_DESC_SET_PORT_INDEX(prTxDesc, ucTarPort);
 
 	ucTarQueue = arTcResourceControl[prMsduInfo->ucTC].ucDestQueueIndex;
-	if (ucTarPort == PORT_INDEX_LMAC) {
+	if (ucTarPort == PORT_INDEX_LMAC)
 		ucTarQueue += (prBssInfo->ucWmmQueSet * WMM_AC_INDEX_NUM);
-	} else if (ucTarPort == PORT_INDEX_MCU &&
-		prMsduInfo->ucControlFlag & MSDU_CONTROL_FLAG_FORCE_TX) {
-		/* To MCU packet with always tx flag */
-		DBGLOG(QM, INFO, "ALTX SEND!\n");
-		ucTarQueue = MAC_TXQ_ALTX_0_INDEX;
-	}
 
 	HAL_MAC_TX_DESC_SET_QUEUE_INDEX(prTxDesc, ucTarQueue);
 
@@ -1834,27 +1828,20 @@ WLAN_STATUS nicTxCmd(IN P_ADAPTER_T prAdapter, IN P_CMD_INFO_T prCmdInfo, IN UIN
 		prCmdInfo->pucTxp = prMsduInfo->prPacket;
 		prCmdInfo->u4TxpLen = prMsduInfo->u2FrameLength;
 
+		HAL_WRITE_TX_CMD(prAdapter, prCmdInfo, ucTC);
+		/* <4> Management Frame Post-Processing */
+		GLUE_DEC_REF_CNT(prTxCtrl->i4TxMgmtPendingNum);
+
+		DBGLOG(INIT, INFO, "TX MGMT Frame: BSS[%u] WIDX:PID[%u:%u] SEQ[%u] STA[%u] RSP[%u]\n",
+			prMsduInfo->ucBssIndex, prMsduInfo->ucWlanIndex, prMsduInfo->ucPID,
+			prMsduInfo->ucTxSeqNum, prMsduInfo->ucStaRecIndex, prMsduInfo->pfTxDoneHandler ? TRUE : FALSE);
+
 		if (prMsduInfo->pfTxDoneHandler) {
 			/* DBGLOG(INIT, TRACE,("Wait Cmd TxSeqNum:%d\n", prMsduInfo->ucTxSeqNum)); */
 			KAL_ACQUIRE_SPIN_LOCK(prAdapter, SPIN_LOCK_TXING_MGMT_LIST);
 			QUEUE_INSERT_TAIL(&(prTxCtrl->rTxMgmtTxingQueue), (P_QUE_ENTRY_T) prMsduInfo);
 			KAL_RELEASE_SPIN_LOCK(prAdapter, SPIN_LOCK_TXING_MGMT_LIST);
-			DBGLOG(TX, INFO, "Insert msdu WIDX:PID[%u:%u]\n",
-				prMsduInfo->ucWlanIndex, prMsduInfo->ucPID);
-		}
-
-		DBGLOG(INIT, INFO,
-		"TX MGMT Frame: BSS[%u] WIDX:PID[%u:%u] SEQ[%u] STA[%u] RSP[%u]\n",
-		prMsduInfo->ucBssIndex, prMsduInfo->ucWlanIndex,
-		prMsduInfo->ucPID, prMsduInfo->ucTxSeqNum,
-		prMsduInfo->ucStaRecIndex,
-		prMsduInfo->pfTxDoneHandler ? TRUE : FALSE);
-
-		HAL_WRITE_TX_CMD(prAdapter, prCmdInfo, ucTC);
-		/* <4> Management Frame Post-Processing */
-		GLUE_DEC_REF_CNT(prTxCtrl->i4TxMgmtPendingNum);
-
-		if (prMsduInfo->pfTxDoneHandler == NULL) {
+		} else {
 			cnmMgtPktFree(prAdapter, prMsduInfo);
 		}
 

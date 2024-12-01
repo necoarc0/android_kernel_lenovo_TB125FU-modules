@@ -1,54 +1,7 @@
-/******************************************************************************
- *
- * This file is provided under a dual license.  When you use or
- * distribute this software, you may choose to be licensed under
- * version 2 of the GNU General Public License ("GPLv2 License")
- * or BSD License.
- *
- * GPLv2 License
- *
- * Copyright(C) 2016 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * BSD LICENSE
- *
- * Copyright(C) 2016 MediaTek Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2016 MediaTek Inc.
+ */
 /******************************************************************************
  *[File]             kal_pdma.c
  *[Version]          v1.0
@@ -113,13 +66,12 @@
  *                   F U N C T I O N   D E C L A R A T I O N S
  *******************************************************************************
  */
-static enum ENUM_CMD_TX_RESULT kalDevWriteCmdByQueue(
-		struct GLUE_INFO *prGlueInfo, struct CMD_INFO *prCmdInfo,
-		uint8_t ucTC);
+static bool kalDevWriteCmdByQueue(struct GLUE_INFO *prGlueInfo,
+				  struct CMD_INFO *prCmdInfo, uint8_t ucTC);
 static bool kalDevWriteDataByQueue(struct GLUE_INFO *prGlueInfo,
 				   struct MSDU_INFO *prMsduInfo);
-static bool kalDevKickMsduData(struct GLUE_INFO *prGlueInfo, uint32_t u4Port);
-static bool kalDevKickAmsduData(struct GLUE_INFO *prGlueInfo, uint32_t u4Port);
+static bool kalDevKickMsduData(struct GLUE_INFO *prGlueInfo);
+static bool kalDevKickAmsduData(struct GLUE_INFO *prGlueInfo);
 
 /*******************************************************************************
  *                              F U N C T I O N S
@@ -142,31 +94,21 @@ static inline bool kalIsChipDead(struct GLUE_INFO *prGlueInfo,
 				 uint32_t u4Register, uint32_t *pu4Value)
 {
 	struct GL_HIF_INFO *prHifInfo = NULL;
-	struct mt66xx_chip_info *prChipInfo = NULL;
 	uint32_t u4Value;
 	uint32_t u4BusAddr;
 
 	prHifInfo = &prGlueInfo->rHifInfo;
-	prChipInfo = prGlueInfo->prAdapter->chip_info;
-
-#if (CFG_ENABLE_HOST_BUS_TIMEOUT == 1)
-	if (*pu4Value == 0xdead0001) {
-		DBGLOG(HAL, ERROR, "Host bus hang timeout, CR[0x%08x]\n",
-				u4Register);
-		return true;
-	}
-#endif
 
 	if (*pu4Value != HIF_DEADFEED_VALUE)
 		return false;
 
-	if (!halChipToStaticMapBusAddr(prChipInfo, CONN_CFG_CHIP_ID_ADDR,
+	if (!halChipToStaticMapBusAddr(prGlueInfo, CONN_CFG_CHIP_ID_ADDR,
 				       &u4BusAddr)) {
 		DBGLOG(HAL, ERROR, "Not exist CR read[0x%08x]\n", u4Register);
 		return false;
 	}
 
-	RTMP_IO_READ32(prChipInfo, u4BusAddr, &u4Value);
+	RTMP_IO_READ32(prHifInfo, u4BusAddr, &u4Value);
 
 	return u4Value == HIF_DEADFEED_VALUE;
 }
@@ -186,31 +128,23 @@ static inline bool kalIsChipDead(struct GLUE_INFO *prGlueInfo,
 u_int8_t kalDevRegRead(IN struct GLUE_INFO *prGlueInfo,
 	IN uint32_t u4Register, OUT uint32_t *pu4Value)
 {
-	struct mt66xx_chip_info *prChipInfo = NULL;
 	struct GL_HIF_INFO *prHifInfo = NULL;
 	struct ADAPTER *prAdapter = NULL;
 	struct BUS_INFO *prBusInfo = NULL;
 	uint32_t u4BusAddr = u4Register;
 
+	ASSERT(prGlueInfo);
 	ASSERT(pu4Value);
 
-	if (prGlueInfo) {
-		prHifInfo = &prGlueInfo->rHifInfo;
-		prAdapter = prGlueInfo->prAdapter;
-		ASSERT(prAdapter);
-	}
+	prHifInfo = &prGlueInfo->rHifInfo;
+	prAdapter = prGlueInfo->prAdapter;
+	ASSERT(prAdapter);
+	prBusInfo = prAdapter->chip_info->bus_info;
 
-	glGetChipInfo((void **)&prChipInfo);
-	if (!prChipInfo)
-		return FALSE;
-
-	prBusInfo = prChipInfo->bus_info;
-
-	if (prHifInfo && !prHifInfo->fgIsDumpLog &&
-	    prBusInfo->isValidRegAccess &&
+	if (!prHifInfo->fgIsDumpLog && prBusInfo->isValidRegAccess &&
 	    !prBusInfo->isValidRegAccess(prAdapter, u4Register)) {
-		/* Don't printk log when resetting */
-		if (prAdapter && !wlanIsChipNoAck(prAdapter)) {
+		/* Don't print log when resetting */
+		if (!wlanIsChipNoAck(prAdapter)) {
 			DBGLOG(HAL, ERROR,
 			       "Invalid access! Get CR[0x%08x/0x%08x] value[0x%08x]\n",
 			       u4Register, u4BusAddr, *pu4Value);
@@ -220,17 +154,16 @@ u_int8_t kalDevRegRead(IN struct GLUE_INFO *prGlueInfo,
 	}
 
 	/* Static mapping */
-	if (halChipToStaticMapBusAddr(prChipInfo, u4Register, &u4BusAddr)) {
-		RTMP_IO_READ32(prChipInfo, u4BusAddr, pu4Value);
-		if (prGlueInfo &&
-		    kalIsChipDead(prGlueInfo, u4Register, pu4Value)) {
-			/* Don't printk log when resetting */
-			if (prAdapter && !wlanIsChipNoAck(prAdapter)) {
+	if (halChipToStaticMapBusAddr(prGlueInfo, u4Register, &u4BusAddr)) {
+		RTMP_IO_READ32(prHifInfo, u4BusAddr, pu4Value);
+		if (kalIsChipDead(prGlueInfo, u4Register, pu4Value)) {
+			/* Don't print log when resetting */
+			if (!wlanIsChipNoAck(prAdapter)) {
 				DBGLOG(HAL, ERROR,
 				       "Read register is deadfeed\n");
-				glSetRstReason(RST_REG_READ_DEADFEED);
-				GL_RESET_TRIGGER(prAdapter,
-						 RST_FLAG_CHIP_RESET);
+				GL_USER_DEFINE_RESET_TRIGGER(prAdapter,
+							     RST_CR_ACCESS_FAIL,
+						       RST_FLAG_DO_WHOLE_RESET);
 			}
 			return FALSE;
 		}
@@ -256,29 +189,22 @@ u_int8_t kalDevRegRead(IN struct GLUE_INFO *prGlueInfo,
 u_int8_t kalDevRegWrite(IN struct GLUE_INFO *prGlueInfo,
 	IN uint32_t u4Register, IN uint32_t u4Value)
 {
-	struct mt66xx_chip_info *prChipInfo = NULL;
 	struct GL_HIF_INFO *prHifInfo = NULL;
 	struct ADAPTER *prAdapter = NULL;
 	struct BUS_INFO *prBusInfo = NULL;
 	uint32_t u4BusAddr = u4Register;
 
-	if (prGlueInfo) {
-		prHifInfo = &prGlueInfo->rHifInfo;
-		prAdapter = prGlueInfo->prAdapter;
-		ASSERT(prAdapter);
-	}
+	ASSERT(prGlueInfo);
 
-	glGetChipInfo((void **)&prChipInfo);
-	if (!prChipInfo)
-		return FALSE;
+	prHifInfo = &prGlueInfo->rHifInfo;
+	prAdapter = prGlueInfo->prAdapter;
+	ASSERT(prAdapter);
+	prBusInfo = prAdapter->chip_info->bus_info;
 
-	prBusInfo = prChipInfo->bus_info;
-
-	if (prHifInfo && !prHifInfo->fgIsDumpLog &&
-	    prBusInfo->isValidRegAccess &&
+	if (!prHifInfo->fgIsDumpLog && prBusInfo->isValidRegAccess &&
 	    !prBusInfo->isValidRegAccess(prAdapter, u4Register)) {
-		/* Don't printk log when resetting */
-		if (prAdapter && !wlanIsChipNoAck(prAdapter)) {
+		/* Don't print log when resetting */
+		if (!wlanIsChipNoAck(prAdapter)) {
 			DBGLOG(HAL, ERROR,
 			       "Invalid access! Set CR[0x%08x/0x%08x] value[0x%08x]\n",
 			       u4Register, u4BusAddr, u4Value);
@@ -287,15 +213,14 @@ u_int8_t kalDevRegWrite(IN struct GLUE_INFO *prGlueInfo,
 	}
 
 	/* Static mapping */
-	if (halChipToStaticMapBusAddr(prChipInfo, u4Register, &u4BusAddr)) {
-		RTMP_IO_WRITE32(prChipInfo, u4BusAddr, u4Value);
+	if (halChipToStaticMapBusAddr(prGlueInfo, u4Register, &u4BusAddr)) {
+		RTMP_IO_WRITE32(prHifInfo, u4BusAddr, u4Value);
 	} else {
 		DBGLOG(HAL, ERROR, "Not exist CR write[0x%08x] value[0x%08x]\n",
 		       u4Register, u4Value);
 	}
 
-	if (prHifInfo)
-		prHifInfo->u4HifCnt++;
+	prHifInfo->u4HifCnt++;
 
 	return TRUE;
 }
@@ -306,30 +231,18 @@ static bool kalWaitRxDmaDone(struct GLUE_INFO *prGlueInfo,
 			     uint16_t u2Port)
 {
 	uint32_t u4Count = 0;
-	uint32_t u4CpuIdx = 0;
 
 	for (u4Count = 0; pRxD->DMADONE == 0; u4Count++) {
+		kalDevRegRead(prGlueInfo, prRxRing->hw_didx_addr,
+			      &prRxRing->RxDmaIdx);
 		if (u4Count > DMA_DONE_WAITING_COUNT) {
-			kalDevRegRead(prGlueInfo, prRxRing->hw_didx_addr,
-				      &prRxRing->RxDmaIdx);
 			DBGLOG(HAL, INFO,
 			       "Rx DMA done P[%u] DMA[%u] CPU[%u]\n",
 			       u2Port, prRxRing->RxDmaIdx, prRxRing->RxCpuIdx);
-
-			u4CpuIdx = prRxRing->RxCpuIdx;
-			kalDumpRxRing(prGlueInfo, prRxRing, u4CpuIdx,
-						  true, 64);
-			INC_RING_INDEX(u4CpuIdx, prRxRing->u4RingSize);
-			kalDumpRxRing(prGlueInfo, prRxRing, u4CpuIdx,
-						  true, 64);
-			INC_RING_INDEX(u4CpuIdx, prRxRing->u4RingSize);
-			kalDumpRxRing(prGlueInfo, prRxRing, u4CpuIdx,
-						  true, 64);
-
 			return false;
 		}
 
-		kalUdelay(DMA_DONE_WAITING_TIME);
+		kalMdelay(DMA_DONE_WAITING_TIME);
 	}
 	return true;
 }
@@ -370,8 +283,6 @@ u_int8_t kalDevPortRead(IN struct GLUE_INFO *prGlueInfo,
 	prHifInfo = &prGlueInfo->rHifInfo;
 	prMemOps = &prHifInfo->rMemOps;
 	prRxRing = &prHifInfo->RxRing[u2Port];
-
-	kalDevRegRead(prGlueInfo, prRxRing->hw_cidx_addr, &prRxRing->RxCpuIdx);
 	u4CpuIdx = prRxRing->RxCpuIdx;
 	INC_RING_INDEX(u4CpuIdx, prRxRing->u4RingSize);
 
@@ -383,7 +294,8 @@ u_int8_t kalDevPortRead(IN struct GLUE_INFO *prGlueInfo,
 
 	if (!kalWaitRxDmaDone(prGlueInfo, prRxRing, pRxD, u2Port)) {
 		if (!prRxRing->fgIsDumpLog) {
-			DBGLOG(HAL, ERROR, "RX Done bit not ready(PortRead)\n");
+			prAdapter->u4HifDbgFlag |= DEG_HIF_DEFAULT_DUMP;
+			halPrintHifDbgInfo(prAdapter);
 		}
 		prRxRing->fgIsDumpLog = true;
 		return FALSE;
@@ -416,7 +328,7 @@ u_int8_t kalDevPortRead(IN struct GLUE_INFO *prGlueInfo,
 	prDmaBuf = &pRxCell->DmaBuf;
 	if (prMemOps->copyEvent &&
 	    !prMemOps->copyEvent(prHifInfo, pRxCell, pRxD,
-				 prDmaBuf, pucBuf, u4Len)) {
+				 prDmaBuf, pucBuf, pRxD->SDLen0)) {
 		ASSERT(0);
 		return FALSE;
 	}
@@ -433,10 +345,8 @@ skip:
 	pRxD->DMADONE = 0;
 
 	prRxRing->RxCpuIdx = u4CpuIdx;
-	kalDevRegWrite(prGlueInfo, prRxRing->hw_cidx_addr, prRxRing->RxCpuIdx);
+	prRxRing->fgSwRead = true;
 	prRxRing->fgIsDumpLog = false;
-
-	GLUE_INC_REF_CNT(prGlueInfo->prAdapter->rHifStats.u4EventRxCount);
 
 	return fgRet;
 }
@@ -474,6 +384,20 @@ kalDevPortWrite(IN struct GLUE_INFO *prGlueInfo,
 	prHifInfo = &prGlueInfo->rHifInfo;
 	prMemOps = &prHifInfo->rMemOps;
 	prTxRing = &prHifInfo->TxRing[u2Port];
+
+#if (CFG_SUPPORT_CONNAC3X == 1)
+	if (prTxRing->u4UsedCnt + 1 >= TX_RING_SIZE) {
+		DBGLOG(HAL, INFO, "Force recycle port %d DMA resource.\n",
+			u2Port);
+		halWpdmaProcessCmdDmaDone(prGlueInfo, u2Port);
+	}
+
+	if (prTxRing->u4UsedCnt + 1 >= TX_RING_SIZE) {
+		DBGLOG(HAL, ERROR, "Port %d TX resource is NOT enough.\n",
+			u2Port);
+		return FALSE;
+	}
+#endif
 
 	if (prMemOps->allocRuntimeMem)
 		pucDst = prMemOps->allocRuntimeMem(u4Len);
@@ -523,8 +447,6 @@ kalDevPortWrite(IN struct GLUE_INFO *prGlueInfo,
 
 	kalDevRegWrite(prGlueInfo, prTxRing->hw_cidx_addr, prTxRing->TxCpuIdx);
 
-	GLUE_INC_REF_CNT(prGlueInfo->prAdapter->rHifStats.u4CmdTxCount);
-
 	return TRUE;
 }
 
@@ -538,7 +460,7 @@ void kalDevReadIntStatus(IN struct ADAPTER *prAdapter,
 
 	HAL_MCR_RD(prAdapter, WPDMA_INT_STA, &u4RegValue);
 
-	if (HAL_IS_RX_DONE_INTR(u4RegValue))
+	if (HAL_IS_RX_DONE_INTR(u4RegValue) || prAdapter->u4NoMoreRfb != 0)
 		*pu4IntStatus |= WHISR_RX0_DONE_INT;
 
 	if (HAL_IS_TX_DONE_INTR(u4RegValue))
@@ -554,7 +476,7 @@ void kalDevReadIntStatus(IN struct ADAPTER *prAdapter,
 
 }
 
-enum ENUM_CMD_TX_RESULT kalDevWriteCmd(IN struct GLUE_INFO *prGlueInfo,
+u_int8_t kalDevWriteCmd(IN struct GLUE_INFO *prGlueInfo,
 	IN struct CMD_INFO *prCmdInfo, IN uint8_t ucTC)
 {
 	struct GL_HIF_INFO *prHifInfo = NULL;
@@ -568,9 +490,8 @@ enum ENUM_CMD_TX_RESULT kalDevWriteCmd(IN struct GLUE_INFO *prGlueInfo,
 	return halWpdmaWriteCmd(prGlueInfo, prCmdInfo, ucTC);
 }
 
-static enum ENUM_CMD_TX_RESULT kalDevWriteCmdByQueue(
-		struct GLUE_INFO *prGlueInfo, struct CMD_INFO *prCmdInfo,
-		uint8_t ucTC)
+static bool kalDevWriteCmdByQueue(struct GLUE_INFO *prGlueInfo,
+				  struct CMD_INFO *prCmdInfo, uint8_t ucTC)
 {
 	struct GL_HIF_INFO *prHifInfo = NULL;
 	struct TX_CMD_REQ *prTxReq;
@@ -582,14 +503,16 @@ static enum ENUM_CMD_TX_RESULT kalDevWriteCmdByQueue(
 	if (prTxReq == NULL) {
 		DBGLOG(HAL, ERROR, "kmalloc() TX_CMD_REQ error\n");
 		halWpdmaWriteCmd(prGlueInfo, prCmdInfo, ucTC);
-		return CMD_TX_RESULT_FAILED;
+		goto error;
 	}
 
 	prTxReq->prCmdInfo = prCmdInfo;
 	prTxReq->ucTC = ucTC;
 	list_add_tail(&prTxReq->list, &prHifInfo->rTxCmdQ);
 
-	return CMD_TX_RESULT_QUEUED;
+error:
+
+	return true;
 }
 
 bool kalDevKickCmd(IN struct GLUE_INFO *prGlueInfo)
@@ -597,25 +520,15 @@ bool kalDevKickCmd(IN struct GLUE_INFO *prGlueInfo)
 	struct GL_HIF_INFO *prHifInfo = NULL;
 	struct list_head *prCur, *prNext;
 	struct TX_CMD_REQ *prTxReq;
-	enum ENUM_CMD_TX_RESULT ret;
 
 	ASSERT(prGlueInfo);
 	prHifInfo = &prGlueInfo->rHifInfo;
 
 	list_for_each_safe(prCur, prNext, &prHifInfo->rTxCmdQ) {
 		prTxReq = list_entry(prCur, struct TX_CMD_REQ, list);
-		if (prTxReq->prCmdInfo) {
-			ret = halWpdmaWriteCmd(prGlueInfo,
+		if (prTxReq->prCmdInfo)
+			halWpdmaWriteCmd(prGlueInfo,
 				prTxReq->prCmdInfo, prTxReq->ucTC);
-			if (ret == CMD_TX_RESULT_SUCCESS) {
-				if (prTxReq->prCmdInfo->pfHifTxCmdDoneCb)
-					prTxReq->prCmdInfo->pfHifTxCmdDoneCb(
-						prGlueInfo->prAdapter,
-						prTxReq->prCmdInfo);
-			} else {
-				DBGLOG(HAL, ERROR, "ret: %d\n", ret);
-			}
-		}
 		list_del(prCur);
 		kfree(prTxReq);
 	}
@@ -627,6 +540,7 @@ static uint8_t kalGetSwAmsduNum(struct GLUE_INFO *prGlueInfo,
 				struct MSDU_INFO *prMsduInfo)
 {
 	struct ADAPTER *prAdapter;
+	struct sk_buff *prSkb;
 	struct STA_RECORD *prStaRec;
 	uint8_t ucTid, ucStaRecIndex;
 	struct TX_DESC_OPS_T *prTxDescOps;
@@ -636,8 +550,9 @@ static uint8_t kalGetSwAmsduNum(struct GLUE_INFO *prGlueInfo,
 
 	prAdapter = prGlueInfo->prAdapter;
 	prTxDescOps = prAdapter->chip_info->prTxDescOps;
+	prSkb = (struct sk_buff *)prMsduInfo->prPacket;
 
-	ucTid = prMsduInfo->ucUserPriority;
+	ucTid = prTxDescOps->nic_txd_tid_op((void *)prSkb->data, 0, FALSE);
 	ucStaRecIndex = prMsduInfo->ucStaRecIndex;
 	if (ucStaRecIndex >= CFG_STA_REC_NUM || ucTid >= TX_DESC_TID_NUM)
 		return 0;
@@ -652,9 +567,20 @@ static uint8_t kalGetSwAmsduNum(struct GLUE_INFO *prGlueInfo,
 u_int8_t kalDevWriteData(IN struct GLUE_INFO *prGlueInfo,
 	IN struct MSDU_INFO *prMsduInfo)
 {
+	struct GL_HIF_INFO *prHifInfo = NULL;
+	struct mt66xx_chip_info *prChipInfo;
+
 	ASSERT(prGlueInfo);
 
-	return kalDevWriteDataByQueue(prGlueInfo, prMsduInfo);
+	prHifInfo = &prGlueInfo->rHifInfo;
+	prChipInfo = prGlueInfo->prAdapter->chip_info;
+
+	if (nicSerIsTxStop(prGlueInfo->prAdapter) ||
+	    (prChipInfo->ucMaxSwAmsduNum > 1 &&
+	     kalGetSwAmsduNum(prGlueInfo, prMsduInfo) > 1))
+		return kalDevWriteDataByQueue(prGlueInfo, prMsduInfo);
+
+	return halWpdmaWriteMsdu(prGlueInfo, prMsduInfo, NULL);
 }
 
 static bool kalDevWriteDataByQueue(IN struct GLUE_INFO *prGlueInfo,
@@ -662,16 +588,14 @@ static bool kalDevWriteDataByQueue(IN struct GLUE_INFO *prGlueInfo,
 {
 	struct GL_HIF_INFO *prHifInfo = NULL;
 	struct TX_DATA_REQ *prTxReq;
-	uint32_t u4Port = 0;
 
 	ASSERT(prGlueInfo);
 	prHifInfo = &prGlueInfo->rHifInfo;
 
-	u4Port = halTxRingDataSelect(prGlueInfo->prAdapter, prMsduInfo);
 	prTxReq = &prMsduInfo->rTxReq;
 	prTxReq->prMsduInfo = prMsduInfo;
-	list_add_tail(&prTxReq->list, &prHifInfo->rTxDataQ[u4Port]);
-	prHifInfo->u4TxDataQLen[u4Port]++;
+	list_add_tail(&prTxReq->list, &prHifInfo->rTxDataQ);
+	prHifInfo->u4TxDataQLen++;
 
 	return true;
 }
@@ -689,29 +613,15 @@ static bool kalDevWriteDataByQueue(IN struct GLUE_INFO *prGlueInfo,
 u_int8_t kalDevKickData(IN struct GLUE_INFO *prGlueInfo)
 {
 	struct mt66xx_chip_info *prChipInfo;
-	struct GL_HIF_INFO *prHifInfo = NULL;
-	struct RTMP_TX_RING *prTxRing;
-	uint32_t u4Idx;
 
 	ASSERT(prGlueInfo);
 
 	prChipInfo = prGlueInfo->prAdapter->chip_info;
-	prHifInfo = &prGlueInfo->rHifInfo;
 
-	for (u4Idx = 0; u4Idx < NUM_OF_TX_RING; u4Idx++) {
-		if (list_empty(&prHifInfo->rTxDataQ[u4Idx]))
-			continue;
-		prTxRing = &prHifInfo->TxRing[u4Idx];
-		kalDevRegRead(prGlueInfo, prTxRing->hw_cidx_addr,
-			      &prTxRing->TxCpuIdx);
-		if (prChipInfo->ucMaxSwAmsduNum > 1)
-			kalDevKickAmsduData(prGlueInfo, u4Idx);
-		else
-			kalDevKickMsduData(prGlueInfo, u4Idx);
-		kalDevRegWrite(prGlueInfo, prTxRing->hw_cidx_addr,
-			       prTxRing->TxCpuIdx);
-	}
-	return 0;
+	if (prChipInfo->ucMaxSwAmsduNum > 1)
+		return kalDevKickAmsduData(prGlueInfo);
+
+	return kalDevKickMsduData(prGlueInfo);
 }
 
 static uint16_t kalGetPaddingSize(uint16_t u2TxByteCount)
@@ -747,7 +657,7 @@ static uint16_t kalGetMoreSizeForAmsdu(uint32_t u4TxdDW1)
 	return u2Size;
 }
 
-static bool kalDevKickMsduData(struct GLUE_INFO *prGlueInfo, uint32_t u4Port)
+static bool kalDevKickMsduData(struct GLUE_INFO *prGlueInfo)
 {
 	struct GL_HIF_INFO *prHifInfo = NULL;
 	struct BUS_INFO *prBusInfo = NULL;
@@ -761,7 +671,7 @@ static bool kalDevKickMsduData(struct GLUE_INFO *prGlueInfo, uint32_t u4Port)
 	prHifInfo = &prGlueInfo->rHifInfo;
 	prBusInfo = prGlueInfo->prAdapter->chip_info->bus_info;
 
-	list_for_each_safe(prCur, prNext, &prHifInfo->rTxDataQ[u4Port]) {
+	list_for_each_safe(prCur, prNext, &prHifInfo->rTxDataQ) {
 		prTxReq = list_entry(prCur, struct TX_DATA_REQ, list);
 		prMsduInfo = prTxReq->prMsduInfo;
 		if (!prMsduInfo ||
@@ -773,9 +683,15 @@ static bool kalDevKickMsduData(struct GLUE_INFO *prGlueInfo, uint32_t u4Port)
 
 	return fgRet;
 }
-
-static int kalAmsduTxDCmp(void *prPriv, struct list_head *prList1,
-			  struct list_head *prList2)
+#if KERNEL_VERSION(5, 13, 0) <= LINUX_VERSION_CODE
+static int kalAmsduTxDCmp(void *prPriv,
+		const struct list_head *prList1,
+		const struct list_head *prList2)
+#else
+static int kalAmsduTxDCmp(void *prPriv,
+		struct list_head *prList1,
+		struct list_head *prList2)
+#endif
 {
 	struct TX_DATA_REQ *prTxReq1, *prTxReq2;
 	struct sk_buff *prSkb1, *prSkb2;
@@ -864,7 +780,7 @@ static uint32_t kalGetNumOfAmsdu(struct GLUE_INFO *prGlueInfo,
 	return u4Cnt;
 }
 
-static bool kalDevKickAmsduData(struct GLUE_INFO *prGlueInfo, uint32_t u4Port)
+static bool kalDevKickAmsduData(struct GLUE_INFO *prGlueInfo)
 {
 	struct GL_HIF_INFO *prHifInfo = NULL;
 	struct BUS_INFO *prBusInfo = NULL;
@@ -880,7 +796,7 @@ static bool kalDevKickAmsduData(struct GLUE_INFO *prGlueInfo, uint32_t u4Port)
 	prHifInfo = &prGlueInfo->rHifInfo;
 	prBusInfo = prGlueInfo->prAdapter->chip_info->bus_info;
 
-	prHead = &prHifInfo->rTxDataQ[u4Port];
+	prHead = &prHifInfo->rTxDataQ;
 	list_for_each_safe(prCur, prNext, prHead) {
 		prTxReq = list_entry(prCur, struct TX_DATA_REQ, list);
 		prMsduInfo = prTxReq->prMsduInfo;
@@ -925,29 +841,36 @@ bool kalDevReadData(struct GLUE_INFO *prGlueInfo, uint16_t u2Port,
 	struct RTMP_DMABUF *prDmaBuf;
 	u_int8_t fgRet = TRUE;
 	uint32_t u4CpuIdx = 0;
-#ifdef CFG_SUPPORT_PDMA_SCATTER
+#if (CFG_SUPPORT_PDMA_SCATTER == 1)
 	struct RTMP_DMACB *pRxCellScatter;
 	struct RXD_STRUCT *pRxDScatter;
 	uint32_t u4CpuIdxScatter = 0;
 	uint8_t ucScatterCnt = 0;
 	uint8_t *pucRecvBuff;
 #endif
+
 	ASSERT(prGlueInfo);
 
 	prAdapter = prGlueInfo->prAdapter;
 	prHifInfo = &prGlueInfo->rHifInfo;
 	prMemOps = &prHifInfo->rMemOps;
 	prRxRing = &prHifInfo->RxRing[u2Port];
-
 	u4CpuIdx = prRxRing->RxCpuIdx;
 	INC_RING_INDEX(u4CpuIdx, prRxRing->u4RingSize);
 
 	pRxCell = &prRxRing->Cell[u4CpuIdx];
 	pRxD = (struct RXD_STRUCT *)pRxCell->AllocVa;
 
+#if 0
+	/* Caller should check resource available ready */
+	if (halWpdmaGetRxDmaDoneCnt(prGlueInfo, u2Port) == 0)
+		return FALSE;
+#endif
+
 	if (!kalWaitRxDmaDone(prGlueInfo, prRxRing, pRxD, u2Port)) {
 		if (!prRxRing->fgIsDumpLog) {
-			DBGLOG(HAL, ERROR, "RX Done bit not ready(ReadData)\n");
+			prAdapter->u4HifDbgFlag |= DEG_HIF_DEFAULT_DUMP;
+			halPrintHifDbgInfo(prAdapter);
 		}
 		prRxRing->fgIsDumpLog = true;
 		return false;
@@ -955,40 +878,30 @@ bool kalDevReadData(struct GLUE_INFO *prGlueInfo, uint16_t u2Port,
 
 	if (pRxD->LastSec0 == 0 || prRxRing->fgRxSegPkt) {
 		/* Rx segmented packet */
-#define __TEMP_STR__ \
-	"Skip Rx segmented data packet, SDL0[%u] LS0[%u] Mo[%u]\n"
 		DBGLOG(HAL, WARN,
-			__TEMP_STR__,
-			pRxD->SDLen0, pRxD->LastSec0,
-			prGlueInfo->fgIsEnableMon);
-
-		/* should not do pdma scatter when sniffer mode is disabled */
-#ifdef CFG_SUPPORT_PDMA_SCATTER
-		if (prGlueInfo->fgIsEnableMon &&
-			prRxRing->fgRxSegPkt == FALSE) {
+			"Skip Rx segmented data packet, SDL0[%u] LS0[%u]\n",
+			pRxD->SDLen0, pRxD->LastSec0);
+#if (CFG_SUPPORT_PDMA_SCATTER == 1)
+		if (prRxRing->fgRxSegPkt == FALSE) {
 			u4CpuIdxScatter = u4CpuIdx;
 			do {
 				pRxCellScatter =
 					&prRxRing->Cell[u4CpuIdxScatter];
-				pRxDScatter =
-					(struct RXD_STRUCT *)
-						pRxCellScatter->AllocVa;
+				pRxDScatter = (struct RXD_STRUCT *)
+					pRxCellScatter->AllocVa;
 				ucScatterCnt++;
 
 				if (pRxDScatter->LastSec0 == 1)
 					break;
 
 				INC_RING_INDEX(u4CpuIdxScatter,
-					prRxRing->u4RingSize);
+					       prRxRing->u4RingSize);
 			} while (TRUE);
 
 			prRxRing->pvPacket = kalPacketAlloc(prGlueInfo,
 					(ucScatterCnt * CFG_RX_MAX_MPDU_SIZE),
-						&pucRecvBuff);
+					&pucRecvBuff);
 			prRxRing->u4PacketLen = 0;
-			RX_ADD_CNT(&prAdapter->rRxCtrl,
-				RX_PDMA_SCATTER_DATA_COUNT,
-				ucScatterCnt);
 		}
 #endif
 		if (pRxD->LastSec0 == 1) {
@@ -1000,7 +913,7 @@ bool kalDevReadData(struct GLUE_INFO *prGlueInfo, uint16_t u2Port,
 		}
 
 		fgRet = false;
-#ifdef CFG_SUPPORT_PDMA_SCATTER
+#if (CFG_SUPPORT_PDMA_SCATTER == 1)
 		if (prRxRing->pvPacket == NULL)
 #endif
 		goto skip;
@@ -1008,11 +921,13 @@ bool kalDevReadData(struct GLUE_INFO *prGlueInfo, uint16_t u2Port,
 
 	prDmaBuf = &pRxCell->DmaBuf;
 
+	if (prMemOps->flushCache)
+		prMemOps->flushCache(prHifInfo, prDmaBuf->AllocVa,
+				     pRxD->SDLen0);
+
 	if (prMemOps->copyRxData &&
-	    !prMemOps->copyRxData(prHifInfo, pRxCell, prDmaBuf, prSwRfb)) {
-		fgRet = false;
-		goto skip;
-	}
+	    !prMemOps->copyRxData(prHifInfo, pRxCell, prDmaBuf, prSwRfb))
+		return FALSE;
 
 	prSwRfb->pucRecvBuff = ((struct sk_buff *)prSwRfb->pvPacket)->data;
 	prSwRfb->prRxStatus = (void *)prSwRfb->pucRecvBuff;
@@ -1029,17 +944,14 @@ bool kalDevReadData(struct GLUE_INFO *prGlueInfo, uint16_t u2Port,
 	pRxD->SDPtr1 = 0;
 #endif
 
-#ifdef CFG_SUPPORT_PDMA_SCATTER
-	if (prGlueInfo->fgIsEnableMon && fgRet == FALSE) {
+#if (CFG_SUPPORT_PDMA_SCATTER == 1)
+	if (fgRet == FALSE) {
 		pucRecvBuff = ((struct sk_buff *)prRxRing->pvPacket)->data;
 		pucRecvBuff += prRxRing->u4PacketLen;
 		kalMemCopy(pucRecvBuff, prSwRfb->pucRecvBuff, pRxD->SDLen0);
 		prRxRing->u4PacketLen += pRxD->SDLen0;
 
 		if (prRxRing->fgRxSegPkt == FALSE) {
-			RX_INC_CNT(&prAdapter->rRxCtrl,
-				RX_PDMA_SCATTER_INDICATION_COUNT);
-			/* Last Segment */
 			kalPacketFree(prGlueInfo, prSwRfb->pvPacket);
 			prSwRfb->pvPacket = prRxRing->pvPacket;
 			prSwRfb->pucRecvBuff =
@@ -1055,9 +967,8 @@ skip:
 	pRxD->DMADONE = 0;
 
 	prRxRing->RxCpuIdx = u4CpuIdx;
+	prRxRing->fgSwRead = true;
 	prRxRing->fgIsDumpLog = false;
-
-	GLUE_INC_REF_CNT(prGlueInfo->prAdapter->rHifStats.u4DataRxCount);
 
 #if CFG_TCP_IP_CHKSUM_OFFLOAD
 	if (fgRet)
@@ -1068,6 +979,8 @@ skip:
 	return fgRet;
 }
 
+
+#if (CFG_SUPPORT_CONNAC3X == 1)
 int wf_ioremap_read(phys_addr_t addr, unsigned int *val)
 {
 	void *vir_addr = NULL;
@@ -1075,17 +988,14 @@ int wf_ioremap_read(phys_addr_t addr, unsigned int *val)
 	vir_addr = ioremap(addr, 0x10);
 	if (!vir_addr) {
 		DBGLOG(INIT, ERROR, "%s: Cannot remap address[%pa].\n",
-		       __func__, addr);
+		       addr, __func__);
 		return -1;
 	}
-
 	*val = readl(vir_addr);
 	iounmap(vir_addr);
 	DBGLOG(INIT, TRACE, "Read CONSYS 0x%08x=0x%08x.\n", addr, *val);
-
 	return 0;
 }
-
 int wf_ioremap_write(phys_addr_t addr, unsigned int val)
 {
 	void *vir_addr = NULL;
@@ -1093,13 +1003,12 @@ int wf_ioremap_write(phys_addr_t addr, unsigned int val)
 	vir_addr = ioremap(addr, 0x10);
 	if (!vir_addr) {
 		DBGLOG(INIT, ERROR, "%s: Cannot remap address[%pa].\n",
-		       __func__, addr);
+		       addr, __func__);
 		return -1;
 	}
-
 	writel(val, vir_addr);
 	iounmap(vir_addr);
 	DBGLOG(INIT, TRACE, "Write CONSYS 0x%08x=0x%08x.\n", addr, val);
-
 	return 0;
 }
+#endif /* if (CFG_SUPPORT_CONNAC3X == 1) */

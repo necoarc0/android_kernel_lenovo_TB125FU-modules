@@ -94,3 +94,4 @@ void gps_dl_hal_d2a_rx_dma_claim_emi_usage(enum gps_dl_link_id_enum link_id, boo
 
 
 #endif /* _GPS_DL_HAL_API_H */
+

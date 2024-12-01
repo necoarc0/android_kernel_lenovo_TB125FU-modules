@@ -478,3 +478,4 @@ int btmtk_sdio_reset_dongle(void);
 #define WOBX_TRIGGER_INFO_TRIGGER_CNT_TYPE  5
 
 #endif
+

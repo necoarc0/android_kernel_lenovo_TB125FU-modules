@@ -271,7 +271,9 @@ p2pDevFsmStateTransition(IN P_ADAPTER_T prAdapter,
 
 		if (!fgIsLeaveState) {
 			/* Print log with state changed */
-			if (prP2pDevFsmInfo->eCurrentState != eNextState) {
+			if (prP2pDevFsmInfo->eCurrentState != eNextState
+				&& eNextState >= 0
+				&& prP2pDevFsmInfo->eCurrentState >= 0) {
 				DBGLOG(P2P, STATE, "[P2P_DEV]TRANSITION: [%s] -> [%s]\n",
 					apucDebugP2pDevState[prP2pDevFsmInfo->eCurrentState],
 					apucDebugP2pDevState[eNextState]);
@@ -365,7 +367,7 @@ VOID p2pDevFsmRunEventTimeout(IN P_ADAPTER_T prAdapter, IN ULONG ulParamPtr)
 	do {
 		ASSERT_BREAK((prAdapter != NULL)
 			&& (prP2pDevFsmInfo != NULL));
-		if (prP2pDevFsmInfo->eCurrentState < P2P_DEV_STATE_NUM) {
+		if (prP2pDevFsmInfo->eCurrentState >= 0) {
 			DBGLOG(P2P, INFO, "p2p dev fsm timeout, current state: %d:%s\n",
 				prP2pDevFsmInfo->eCurrentState,
 				apucDebugP2pDevState[prP2pDevFsmInfo->eCurrentState]);

@@ -1,54 +1,7 @@
-/*******************************************************************************
- *
- * This file is provided under a dual license.  When you use or
- * distribute this software, you may choose to be licensed under
- * version 2 of the GNU General Public License ("GPLv2 License")
- * or BSD License.
- *
- * GPLv2 License
- *
- * Copyright(C) 2016 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * BSD LICENSE
- *
- * Copyright(C) 2016 MediaTek Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- ******************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2016 MediaTek Inc.
+ */
 /*
  ** Id: //Department/DaVinci/BRANCHES/MT6620_WIFI_DRIVER_V2_3/os/linux
  *      /platform.c#3
@@ -177,9 +130,6 @@ static int netdev_event(struct notifier_block *nb,
 	}
 #if 0				/* CFG_SUPPORT_PASSPOINT */
 	{
-		/* printk(KERN_INFO
-		 *        "[netdev_event] IPV4_DAD is unlock now!!\n");
-		 */
 		prGlueInfo->fgIsDad = FALSE;
 	}
 #endif /* CFG_SUPPORT_PASSPOINT */
@@ -239,7 +189,7 @@ static int net6dev_event(struct notifier_block *nb,
 		DBGLOG(REQ, INFO, "netdev_event: prGlueInfo is empty.\n");
 		return NOTIFY_DONE;
 	}
-	/* printk(KERN_INFO "[net6dev_event] IPV6_DAD is unlock now!!\n"); */
+
 	prGlueInfo->fgIs6Dad = FALSE;
 
 	return NOTIFY_DONE;
@@ -338,6 +288,171 @@ int glUnregisterEarlySuspend(struct early_suspend *prDesc)
 	prDesc->resume = NULL;
 
 	return ret;
+}
+#endif
+
+#if 0
+/*----------------------------------------------------------------------------*/
+/*!
+ * \brief Utility function for reading data from files on NVRAM-FS
+ *
+ * \param[in]
+ *           filename
+ *           len
+ *           offset
+ * \param[out]
+ *           buf
+ * \return
+ *           actual length of data being read
+ */
+/*----------------------------------------------------------------------------*/
+static int nvram_read(char *filename, char *buf,
+		      ssize_t len, int offset)
+{
+#if CFG_SUPPORT_NVRAM
+	struct file *fd;
+	int retLen = -1;
+#if KERNEL_VERSION(4, 4, 0) <= LINUX_VERSION_CODE
+	loff_t pos;
+	char __user *p;
+#endif
+
+	mm_segment_t old_fs = get_fs();
+
+	set_fs(KERNEL_DS);
+
+	fd = filp_open(filename, O_RDONLY, 0644);
+
+	if (IS_ERR(fd)) {
+		DBGLOG(INIT, INFO, "[nvram_read] : failed to open!!\n");
+		set_fs(old_fs);
+		return -1;
+	}
+
+	do {
+		if (fd->f_op == NULL) {
+			DBGLOG(INIT, INFO, "[nvram_read] : f_op is NULL!!\n");
+			break;
+		}
+
+		if (fd->f_pos != offset) {
+			if (fd->f_op->llseek) {
+				if (fd->f_op->llseek(fd, offset, 0) != offset) {
+					DBGLOG(INIT, INFO,
+					       "[nvram_read] : failed to seek!!\n");
+					break;
+				}
+			} else {
+				fd->f_pos = offset;
+			}
+		}
+
+#if KERNEL_VERSION(4, 4, 0) <= LINUX_VERSION_CODE
+		p = (__force char __user *)buf;
+		pos = (loff_t)offset;
+
+		retLen = __vfs_read(fd, p, len, &pos);
+#else
+		retLen = fd->f_op->read(fd, buf, len, &fd->f_pos);
+#endif
+		if (retLen < 0)
+			DBGLOG(INIT, ERROR,
+			       "[nvram_read] : read failed!! Error code: %d\n",
+			       retLen);
+	} while (FALSE);
+
+	filp_close(fd, NULL);
+
+	set_fs(old_fs);
+
+	return retLen;
+
+#else /* !CFG_SUPPORT_NVRAM */
+
+	return -EIO;
+
+#endif
+}
+
+/*----------------------------------------------------------------------------*/
+/*!
+ * \brief Utility function for writing data to files on NVRAM-FS
+ *
+ * \param[in]
+ *           filename
+ *           buf
+ *           len
+ *           offset
+ * \return
+ *           actual length of data being written
+ */
+/*----------------------------------------------------------------------------*/
+static int nvram_write(char *filename, char *buf,
+		       ssize_t len, int offset)
+{
+#if CFG_SUPPORT_NVRAM
+	struct file *fd;
+	int retLen = -1;
+#if KERNEL_VERSION(4, 4, 0) <= LINUX_VERSION_CODE
+	loff_t pos;
+	char __user *p;
+#endif
+
+	mm_segment_t old_fs = get_fs();
+
+	set_fs(KERNEL_DS);
+
+	fd = filp_open(filename, O_WRONLY | O_CREAT, 0644);
+
+	if (IS_ERR(fd)) {
+		DBGLOG(INIT, INFO, "[nvram_write] : failed to open!!\n");
+		set_fs(old_fs);
+		return -1;
+	}
+
+	do {
+		if (fd->f_op == NULL) {
+			DBGLOG(INIT, INFO, "[nvram_write] : f_op is NULL!!\n");
+			break;
+		}
+		/* End of if */
+		if (fd->f_pos != offset) {
+			if (fd->f_op->llseek) {
+				if (fd->f_op->llseek(fd, offset, 0) != offset) {
+					DBGLOG(INIT, INFO,
+					       "[nvram_write] : failed to seek!!\n");
+					break;
+				}
+			} else {
+				fd->f_pos = offset;
+			}
+		}
+
+#if KERNEL_VERSION(4, 4, 0) <= LINUX_VERSION_CODE
+		p = (__force char __user *)buf;
+		pos = (loff_t)offset;
+
+		retLen = __vfs_write(fd, p, len, &pos);
+#else
+		retLen = fd->f_op->write(fd, buf, len, &fd->f_pos);
+#endif
+		if (retLen < 0)
+			DBGLOG(INIT, ERROR,
+			       "[nvram_write] : write failed!! Error code: %d\n",
+			       retLen);
+	} while (FALSE);
+
+	filp_close(fd, NULL);
+
+	set_fs(old_fs);
+
+	return retLen;
+
+#else /* !CFG_SUPPORT_NVRAMS */
+
+	return -EIO;
+
+#endif
 }
 #endif
 

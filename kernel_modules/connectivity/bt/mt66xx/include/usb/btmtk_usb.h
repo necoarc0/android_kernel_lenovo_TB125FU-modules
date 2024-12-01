@@ -1,7 +1,8 @@
-/* SPDX-License-Identifier: GPL-2.0 */  
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2016,2017 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  */
+
 
 #ifndef _BTMTK_USB_H_
 #define _BTMTK_USB_H_
@@ -32,35 +33,12 @@ typedef int (*set_gpio_high)(u8 gpio);
 
 /* UHW CR mapping */
 #define BT_MISC 0x70002510
-#define MCU_BT0_INIT_DONE (0x1 << 8)
-#define MCU_BT1_INIT_DONE (0x1 << 9)
 #define BT_SUBSYS_RST 0x70002610
-#define BT_SUBSYS_RST_6639 0x70028610
 #define UDMA_INT_STA_BT 0x74000024
 #define UDMA_INT_STA_BT1 0x74000308
 #define BT_WDT_STATUS 0x740003A0
 #define EP_RST_OPT 0x74011890
 #define EP_RST_IN_OUT_OPT 0x00010001
-
-#define BT_GDMA_DONE_ADDR_W 0x74000A0C
-#define BT_GDMA_DONE_7921_VALUE_W 0x00403FA9
-#define BT_GDMA_DONE_7922_VALUE_W 0x00403EA9
-#define BT_GDMA_DONE_7902_VALUE_W 0x00403EA9
-#define BT_GDMA_DONE_ADDR_R 0x74000A08
-#define BT_GDMA_DONE_VALUE_R 0xFFFFFFFB /* bit2: 0 - dma done, 1 - dma doing */
-
-/* CMD&Event sent by driver */
-#define NOTIFY_ALT_EVT_LEN 7
-
-#define LD_PATCH_CMD_LEN 9
-#define LD_PATCH_EVT_LEN 8
-
-#define READ_ADDRESS_EVT_HDR_LEN 7
-#define READ_ADDRESS_EVT_PAYLOAD_OFFSET 7
-#define WOBLE_DEBUG_EVT_TYPE 0xE8
-#define BLE_EVT_TYPE 0x3E
-
-#define WMT_TRIGGER_ASSERT_LEN 9
 
 struct btmtk_cif_chip_reset {
 	/* For Whole chip reset */
@@ -111,5 +89,4 @@ struct btmtk_usb_dev {
 	unsigned char	*urb_ble_isoc_buf;
 	struct btmtk_woble	bt_woble;
 };
-
 #endif

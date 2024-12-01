@@ -54,3 +54,4 @@ void gps_dl_hw_dep_disable_met(void);
 unsigned int gps_dl_hw_dep_get_met_read_ptr_addr(void);
 unsigned int gps_dl_hw_dep_get_met_write_ptr_addr(void);
 #endif
+

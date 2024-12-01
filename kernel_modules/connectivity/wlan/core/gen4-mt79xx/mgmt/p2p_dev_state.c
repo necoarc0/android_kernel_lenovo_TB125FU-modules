@@ -1,54 +1,7 @@
-/******************************************************************************
- *
- * This file is provided under a dual license.  When you use or
- * distribute this software, you may choose to be licensed under
- * version 2 of the GNU General Public License ("GPLv2 License")
- * or BSD License.
- *
- * GPLv2 License
- *
- * Copyright(C) 2016 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * BSD LICENSE
- *
- * Copyright(C) 2016 MediaTek Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2016 MediaTek Inc.
+ */
 #include "precomp.h"
 
 u_int8_t
@@ -108,6 +61,24 @@ p2pDevStateInit_IDLE(IN struct ADAPTER *prAdapter,
 			nicDeactivateNetwork(prAdapter,
 				prAdapter->ucP2PDevBssIdx);
 		}
+#if (CFG_DBDC_SW_FOR_P2P_LISTEN == 1)
+		if (prP2pDevFsmInfo && prP2pDevFsmInfo->fgIsP2pListening
+			&& prAdapter->rWifiVar.ucDbdcP2pLisEn) {
+			if (prAdapter->rWifiVar.u4DbdcP2pLisSwDelayTime) {
+				cnmTimerStopTimer(prAdapter,
+					&(prP2pDevFsmInfo->rP2pListenDbdcTimer));
+
+				cnmTimerStartTimer(prAdapter,
+					&(prP2pDevFsmInfo->rP2pListenDbdcTimer),
+					prAdapter->rWifiVar.u4DbdcP2pLisSwDelayTime);
+			}
+			else {
+				prP2pDevFsmInfo->fgIsP2pListening = FALSE;
+				cnmDbdcRuntimeCheckDecision(prAdapter,
+						prAdapter->ucP2PDevBssIdx, FALSE);
+			}
+		}
+#endif
 	} while (FALSE);
 
 	return fgIsTransition;
@@ -128,6 +99,10 @@ p2pDevStateInit_REQING_CHANNEL(IN struct ADAPTER *prAdapter,
 	struct MSG_P2P_CHNL_REQUEST *prP2pMsgChnlReq =
 		(struct MSG_P2P_CHNL_REQUEST *) NULL;
 	struct BSS_INFO *prBssInfo = (struct BSS_INFO *) NULL;
+#if (CFG_DBDC_SW_FOR_P2P_LISTEN == 1)
+	struct P2P_DEV_FSM_INFO *prP2pDevFsmInfo =
+				(struct P2P_DEV_FSM_INFO *) NULL;
+#endif
 
 	do {
 		ASSERT_BREAK((prAdapter != NULL)
@@ -155,6 +130,32 @@ p2pDevStateInit_REQING_CHANNEL(IN struct ADAPTER *prAdapter,
 		if (prBssInfo->fgIsWmmInited == FALSE)
 			prBssInfo->ucWmmQueSet = MAX_HW_WMM_INDEX;
 		prBssInfo->eBand = prP2pMsgChnlReq->rChannelInfo.eBand;
+#if (CFG_DBDC_SW_FOR_P2P_LISTEN == 1)
+		prP2pDevFsmInfo = prAdapter->rWifiVar.prP2pDevFsmInfo;
+		DBGLOG(P2P, INFO,
+						"ucDbdcP2pLisEn %u P2pLisSwDelayTime %u\n"
+						, prAdapter->rWifiVar.ucDbdcP2pLisEn
+						, prAdapter->rWifiVar.u4DbdcP2pLisSwDelayTime);
+
+		if (prP2pDevFsmInfo &&
+			prAdapter->rWifiVar.ucDbdcP2pLisEn) {
+			prP2pDevFsmInfo->fgIsP2pListening = TRUE;
+			prP2pDevFsmInfo->ucReqChannelNum =
+				prP2pMsgChnlReq->rChannelInfo.ucChannelNum;
+			prP2pDevFsmInfo->eReqBand =
+				prP2pMsgChnlReq->rChannelInfo.eBand;
+
+			cnmTimerStopTimer(prAdapter,
+				&(prP2pDevFsmInfo->rP2pListenDbdcTimer));
+
+			cnmDbdcPreConnectionEnableDecision(
+							prAdapter,
+							prBssInfo->ucBssIndex,
+							prP2pMsgChnlReq->rChannelInfo.eBand,
+							prP2pMsgChnlReq->rChannelInfo.ucChannelNum,
+							prBssInfo->ucWmmQueSet);
+		}
+#endif
 		cnmOpModeGetTRxNss(
 			prAdapter, prBssInfo->ucBssIndex,
 			&prBssInfo->ucOpRxNss, &prBssInfo->ucOpTxNss);

@@ -1526,7 +1526,6 @@ VOID nicTxFreeMsduInfoPacket(IN P_ADAPTER_T prAdapter, IN P_MSDU_INFO_T prMsduIn
 	ASSERT(prMsduInfoListHead);
 
 	prTxCtrl = &prAdapter->rTxCtrl;
-	ASSERT(prTxCtrl);
 
 	while (prMsduInfo) {
 		prNativePacket = prMsduInfo->prPacket;
@@ -1542,8 +1541,7 @@ VOID nicTxFreeMsduInfoPacket(IN P_ADAPTER_T prAdapter, IN P_MSDU_INFO_T prMsduIn
 			cnmMgtPktFree(prAdapter, prTempMsduInfo);
 			continue;
 		} else if (prMsduInfo->eSrc == TX_PACKET_FORWARDING) {
-			if (prTxCtrl)
-				GLUE_DEC_REF_CNT(prTxCtrl->i4PendingFwdFrameCount);
+			GLUE_DEC_REF_CNT(prTxCtrl->i4PendingFwdFrameCount);
 		}
 
 		prMsduInfo = (P_MSDU_INFO_T) QUEUE_GET_NEXT_ENTRY((P_QUE_ENTRY_T) prMsduInfo);

@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-
 /*
- * Copyright (c) 2020 MediaTek Inc.
+ * Copyright (c) 2021 MediaTek Inc.
  */
+
 #include "wpa_supp/FourWayHandShake.h"
 /*#include "wifi_var.h"*/
 
@@ -840,9 +840,7 @@ _wpabuf_alloc(size_t len) {
 
 void *
 wpabuf_put(struct wpabuf *buf, size_t len) {
-	buf->size = len;
-	buf->used = 1;
-	return buf->buf;
+	return NULL;
 }
 
 int

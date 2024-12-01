@@ -2,6 +2,8 @@
 /* 
  *Copyright (c) 2020 MediaTek Inc. 
  */
+
+
 #include "precomp.h"
 #if CFG_SUPPORT_QA_TOOL
 #include "gl_wext.h"

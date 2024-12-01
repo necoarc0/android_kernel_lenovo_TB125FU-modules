@@ -33,3 +33,4 @@ int gps_dl_linux_irqs_register(struct gps_each_irq *p_irqs, int irq_num);
 int gps_dl_linux_irqs_unregister(struct gps_each_irq *p_irqs, int irq_num);
 
 #endif /* _GPS_DL_LINUX_H */
+

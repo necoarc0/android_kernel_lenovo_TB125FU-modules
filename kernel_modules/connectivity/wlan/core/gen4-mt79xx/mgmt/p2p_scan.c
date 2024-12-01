@@ -1,54 +1,7 @@
-/******************************************************************************
- *
- * This file is provided under a dual license.  When you use or
- * distribute this software, you may choose to be licensed under
- * version 2 of the GNU General Public License ("GPLv2 License")
- * or BSD License.
- *
- * GPLv2 License
- *
- * Copyright(C) 2016 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * BSD LICENSE
- *
- * Copyright(C) 2016 MediaTek Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2016 MediaTek Inc.
+ */
 /*
  ** Id: @(#) p2p_scan.c@@
  */
@@ -120,18 +73,6 @@ scanP2pProcessBeaconAndProbeResp(IN struct ADAPTER *prAdapter,
 {
 	u_int8_t fgIsBeacon = FALSE;
 	u_int8_t fgIsSkipThisBeacon = FALSE;
-	u_int8_t fgIsP2pNetRegistered = FALSE;
-
-	/* Sanity check for p2p net device state */
-	GLUE_SPIN_LOCK_DECLARATION();
-	GLUE_ACQUIRE_SPIN_LOCK(prAdapter->prGlueInfo, SPIN_LOCK_NET_DEV);
-	if (prAdapter->fgIsP2PRegistered &&
-		prAdapter->rP2PNetRegState == ENUM_NET_REG_STATE_REGISTERED)
-		fgIsP2pNetRegistered = TRUE;
-	GLUE_RELEASE_SPIN_LOCK(prAdapter->prGlueInfo, SPIN_LOCK_NET_DEV);
-
-	if (!fgIsP2pNetRegistered)
-		return;
 
 	/* Indicate network to kernel for P2P interface when:
 	 *  1. This is P2P network
@@ -216,7 +157,7 @@ scanP2pProcessBeaconAndProbeResp(IN struct ADAPTER *prAdapter,
 		rChannelInfo.eBand = prBssDesc->eBand;
 		prBssDesc->fgIsP2PReport = TRUE;
 
-		DBGLOG(P2P, TRACE,
+		DBGLOG(P2P, INFO,
 			"indicate [" MACSTR "][%s][%s][ch %d][r %d][t %u]\n",
 			MAC2STR(prWlanBeaconFrame->aucBSSID),
 			fgIsBeacon ? "Beacon" : "Probe Response",
@@ -241,10 +182,9 @@ void scnEventReturnChannel(IN struct ADAPTER *prAdapter,
 	struct CMD_SCAN_CANCEL rCmdScanCancel;
 
 	/* send cancel message to firmware domain */
+	memset(&rCmdScanCancel, 0, sizeof(struct CMD_SCAN_CANCEL));
 	rCmdScanCancel.ucSeqNum = ucScnSeqNum;
 	rCmdScanCancel.ucIsExtChannel = (uint8_t) FALSE;
-	rCmdScanCancel.aucReserved[0] = 0;
-	rCmdScanCancel.aucReserved[1] = 0;
 
 	wlanSendSetQueryCmd(prAdapter,
 			    CMD_ID_SCAN_CANCEL,
@@ -294,7 +234,7 @@ struct BSS_DESC *scanP2pSearchDesc(IN struct ADAPTER *prAdapter,
 			MAC2STR(prConnReqInfo->aucBssid));
 		DBGLOG(P2P, LOUD,
 			"Connecting to SSID:%s, length:%d\n",
-			HIDE(prConnReqInfo->rSsidStruct.aucSsid),
+			prConnReqInfo->rSsidStruct.aucSsid,
 			prConnReqInfo->rSsidStruct.ucSsidLen);
 
 		LINK_FOR_EACH_ENTRY(prBssDesc, prBssDescList,
@@ -328,12 +268,11 @@ struct BSS_DESC *scanP2pSearchDesc(IN struct ADAPTER *prAdapter,
 					MAC2STR(prConnReqInfo->aucBssid));
 				DBGLOG(P2P, TRACE,
 					"Connecting to SSID:%s, length:%d\n",
-					HIDE(
-					  prConnReqInfo->rSsidStruct.aucSsid),
+					prConnReqInfo->rSsidStruct.aucSsid,
 					prConnReqInfo->rSsidStruct.ucSsidLen);
 				DBGLOG(P2P, TRACE,
 					"Checking SSID:%s, length:%d\n",
-					HIDE(prBssDesc->aucSSID),
+					prBssDesc->aucSSID,
 					prBssDesc->ucSSIDLen);
 				DBGLOG(P2P, TRACE,
 					"Ignore mismatch SSID, (But BSSID match).\n");

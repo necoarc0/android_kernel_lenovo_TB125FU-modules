@@ -1,81 +1,42 @@
 LOCAL_PATH := $(call my-dir)
 
+MT7961_CHIPS := MT7920 MT7921
 ifeq ($(MTK_WLAN_SUPPORT), yes)
-
 ifeq ($(WLAN_BUILD_COMMON), true)
-	# for layer decoupling 2.0, we have to build all configurations
-	WLAN_CHIP_ID := 6893
-	WIFI_CHIP := CONNAC2X2_SOC3_0
-	WIFI_IP_SET := 1
-	CONNAC_VER := 2_0
-	WIFI_HIF := axi
-	WIFI_WMT := y
-	WIFI_EMI := y
-	WIFI_NAME := wlan_drv_gen4m_6893
-	WIFI_CHRDEV_MODULE := wmt_chrdev_wifi_connac2.ko
-	include $(LOCAL_PATH)/build_wlan_drv.mk
-
-	WLAN_CHIP_ID := 6983
-	WIFI_CHIP := CONNAC2X2_SOC7_0
-	WIFI_IP_SET := 1
-	CONNAC_VER := 2_0
-	WIFI_HIF := axi
-	WIFI_WMT := y
-	WIFI_EMI := y
-	WIFI_NAME := wlan_drv_gen4m_6983
-	WIFI_CHRDEV_MODULE := wmt_chrdev_wifi_connac2.ko
-	include $(LOCAL_PATH)/build_wlan_drv.mk
-
-	WLAN_CHIP_ID := 6879
-	WIFI_CHIP := CONNAC2X2_SOC7_0
-	WIFI_IP_SET := 1
-	CONNAC_VER := 2_0
-	WIFI_HIF := axi
-	WIFI_WMT := y
-	WIFI_EMI := y
-	WIFI_NAME := wlan_drv_gen4m_6879
-	WIFI_CHRDEV_MODULE := wmt_chrdev_wifi_connac2.ko
-	include $(LOCAL_PATH)/build_wlan_drv.mk
-
-	WLAN_CHIP_ID := 6895
-	WIFI_CHIP := CONNAC2X2_SOC7_0
-	WIFI_IP_SET := 1
-	CONNAC_VER := 2_0
-	WIFI_HIF := axi
-	WIFI_WMT := y
-	WIFI_EMI := y
-	WIFI_NAME := wlan_drv_gen4m_6895
-	WIFI_CHRDEV_MODULE := wmt_chrdev_wifi_connac2.ko
-	include $(LOCAL_PATH)/build_wlan_drv.mk
-
-	WLAN_CHIP_ID := 6855
-	WIFI_CHIP := SOC2_1X1
-	WIFI_IP_SET := 1
-	CONNAC_VER :=
-	WIFI_HIF := axi
-	WIFI_WMT := y
-	WIFI_EMI := y
-	WIFI_NAME := wlan_drv_gen4m_6855
-	WIFI_CHRDEV_MODULE := wmt_chrdev_wifi.ko
-	include $(LOCAL_PATH)/build_wlan_drv.mk
-
-	WLAN_CHIP_ID := 6789
-	WIFI_CHIP := SOC2_1X1
-	WIFI_IP_SET := 1
-	CONNAC_VER :=
-	WIFI_HIF := axi
-	WIFI_WMT := y
-	WIFI_EMI := y
-	WIFI_NAME := wlan_drv_gen4m_6789
-	WIFI_CHRDEV_MODULE := wmt_chrdev_wifi.ko
-	include $(LOCAL_PATH)/build_wlan_drv.mk
+    # for layer decoupling 2.0, we have to build all configurations
+    MTK_PLATFORM := mt6789
+    WIFI_CHIP := MT7902
+    WIFI_HIF := sdio
+    WIFI_WMT := n
+    WIFI_EMI := n
+    WIFI_NAME := wlan_mt7902_sdio_mt6789
+    include $(LOCAL_PATH)/build_wlan_drv.mk
 else
-	WIFI_NAME := wlan_drv_gen4m
-	WIFI_HIF := axi
-	WIFI_WMT := y
-	WIFI_EMI := y
-	WIFI_CHRDEV_MODULE := wmt_chrdev_wifi.ko
-	include $(LOCAL_PATH)/build_wlan_drv.mk
-endif
+ifneq (MT7921, $(MTK_COMBO_CHIP)),)
+    include $(CLEAR_VARS)
+    LOCAL_MODULE := wlan_drv_gen4_mt7921.ko
+    LOCAL_PROPRIETARY_MODULE := true
+    LOCAL_MODULE_OWNER := mtk
+    LOCAL_INIT_RC := init.wlan_mt79xx_drv.rc
+    LOCAL_SRC_FILES := $(patsubst $(LOCAL_PATH)/%,%,$(shell find $(LOCAL_PATH) -type f -name '*.[cho]')) Makefile
+    include $(MTK_KERNEL_MODULE)
 
+    WIFI_OPTS := CONFIG_MTK_COMBO_WIFI_HIF=pcie
+    WIFI_OPTS += MTK_COMBO_CHIP=MT7961
+    $(linked_module): OPTS += $(WIFI_OPTS)
+endif
+ifeq (MT7902, $(strip $(MTK_COMBO_CHIP)))
+    include $(CLEAR_VARS)
+    LOCAL_MODULE := wlan_drv_gen4_mt7902.ko
+    LOCAL_PROPRIETARY_MODULE := true
+    LOCAL_MODULE_OWNER := mtk
+    LOCAL_INIT_RC := init.wlan_mt79xx_drv.rc
+    LOCAL_SRC_FILES := $(patsubst $(LOCAL_PATH)/%,%,$(shell find $(LOCAL_PATH) -type f -name '*.[cho]')) Makefile
+    include $(MTK_KERNEL_MODULE)
+
+    WIFI_OPTS := CONFIG_MTK_COMBO_WIFI_HIF=sdio
+    WIFI_OPTS += MTK_COMBO_CHIP=MT7902
+    $(linked_module): OPTS += $(WIFI_OPTS)
+endif
+endif
 endif

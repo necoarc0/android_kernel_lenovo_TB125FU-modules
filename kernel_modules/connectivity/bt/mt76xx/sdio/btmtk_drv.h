@@ -214,3 +214,4 @@ struct ring_buffer {
 #define FW_DUMP_END_EVENT "coredump end"
 
 #endif
+

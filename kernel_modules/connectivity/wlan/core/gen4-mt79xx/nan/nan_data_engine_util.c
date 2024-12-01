@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-
 /*
- * Copyright (c) 2020 MediaTek Inc.
+ * Copyright (c) 2021 MediaTek Inc.
  */
 
 /*******************************************************************************
@@ -179,7 +178,7 @@ nanRetrieveAttrById(uint8_t *pucAttrList, uint16_t u2Length,
 
 		ucAttrId = NAN_GET_U8(pucPtr);
 		u2Length = NAN_GET_U16(pucPtr + 1);
-		DBGLOG(NAN, ERROR, "[%s] ucAttrId = %d\n", __func__, ucAttrId);
+		DBGLOG(NAN, INFO, "ucAttrId = %d\n", ucAttrId);
 
 		if (ucAttrId == ucTargetAttrId) {
 			prTargetAttr = (struct _NAN_ATTR_HDR_T *)pucPtr;
@@ -1671,8 +1670,8 @@ nanNdpParseAttributes(struct ADAPTER *prAdapter,
 		switch (prNanAttr->ucAttrId) {
 		case NAN_ATTR_ID_NDP:
 			fgExistNDP = TRUE;
-			DBGLOG(NAN, ERROR, "[%s] NDP exist, fgExistNDPE= %d\n",
-				__func__, fgExistNDPE);
+			DBGLOG(NAN, INFO, "NDP exist, fgExistNDPE= %d\n",
+				fgExistNDPE);
 
 			/* only parse NDP when support NDPE is turned off,
 			 * or NDPE is not there
@@ -1768,12 +1767,12 @@ nanNdpParseAttributes(struct ADAPTER *prAdapter,
 			fgExistNDPE = TRUE;
 			/* only parse NDPE if option is turned on */
 
-			DBGLOG(NAN, INFO, "[%s] NDPE exist, fgExistNDP = %d\n",
-			__func__, fgExistNDP);
-			rStatus = nanNdpeAttrUpdateNdp(
-				prAdapter, eNanAction,
-				(struct _NAN_ATTR_NDPE_T *)prNanAttr,
-				prNDL, prNDP);
+			DBGLOG(NAN, INFO, "NDPE exist, fgExistNDP = %d\n",
+				fgExistNDP);
+				rStatus = nanNdpeAttrUpdateNdp(
+					prAdapter, eNanAction,
+					(struct _NAN_ATTR_NDPE_T *)prNanAttr,
+					prNDL, prNDP);
 			break;
 		default:
 			break;
@@ -1862,8 +1861,7 @@ nanDataEngineNDPAttrLength(struct ADAPTER *prAdapter,
 
 	if (prNDP != NULL) {
 		if (nanDataEngineNDPECheck(prAdapter, prNDP->fgSupportNDPE)) {
-			DBGLOG(NAN, INFO, "[%s] NDPE instead\n",
-				__func__);
+			DBGLOG(NAN, INFO, "NDPE instead\n");
 			return 0;
 		}
 
@@ -1877,9 +1875,8 @@ nanDataEngineNDPAttrLength(struct ADAPTER *prAdapter,
 		case NDP_INITIATOR_TX_DP_CONFIRM:
 			/* refer to Table.28 - don't carry NDP
 			 * for NDL Counter Reject
-			 * avoid prNDL == NULL for Coverity Check
 			 */
-			if (prNDL != NULL && prNDL->ucNDLSetupCurrentStatus ==
+			if (prNDL->ucNDLSetupCurrentStatus ==
 			    NAN_ATTR_NDL_STATUS_REJECTED)
 				return 0;
 			return u2AttrLength;
@@ -2459,7 +2456,7 @@ nanDataEngineElemContainerAttrAppend(struct ADAPTER *prAdapter,
 	if (nanDataEngineElemContainerAttrLength(prAdapter, prNDL, prNDP) == 0)
 		return;
 
-	prBssInfo = prAdapter->aprBssInfo[nanGetSpecificBssInfo(
+		prBssInfo = prAdapter->aprBssInfo[nanGetSpecificBssInfo(
 			prAdapter, NAN_BSS_INDEX_BAND0)->ucBssIndex];
 	if (prNDP->eCurrentNDPProtocolState == NDP_INITIATOR_TX_DP_REQUEST)
 		nanDataEngineGetECAttrImpl(prAdapter, &pucECAttr,
@@ -2648,13 +2645,11 @@ nanDataEngineNdcAttrLength(struct ADAPTER *prAdapter,
 	/* Sigma 5.3.2 must pass with NDC attr
 	 * not to carry for NDP Status [ACCEPTED] with Data Path Confirm
 	 *  - Table 28
-	 * * avoid prNDL == NULL for Coverity Check
 	 */
 	if (prNDP != NULL &&
 	    prNDP->eCurrentNDPProtocolState == NDP_INITIATOR_TX_DP_CONFIRM &&
 	    prNDP->fgConfirmRequired == TRUE &&
 	    prNDP->ucNDPSetupStatus == NAN_ATTR_NDP_STATUS_ACCEPTED &&
-	    prNDL != NULL &&
 	    prNDL->fgIsCounter == FALSE) {
 		return 0;
 	}
@@ -2796,12 +2791,10 @@ nanDataEngineUnalignedAttrLength(struct ADAPTER *prAdapter,
 	if ((prNDL == NULL) && (prNDP == NULL))
 		return 0;
 
-	/* avoid prNDL == NULL for Coverity Check */
 	if (prNDP != NULL &&
 	    prNDP->eCurrentNDPProtocolState == NDP_INITIATOR_TX_DP_CONFIRM &&
 	    prNDP->fgConfirmRequired == TRUE &&
 	    prNDP->ucNDPSetupStatus == NAN_ATTR_NDP_STATUS_ACCEPTED &&
-		prNDL != NULL &&
 	    prNDL->fgIsCounter == FALSE) {
 		return 0;
 	}
@@ -3268,16 +3261,14 @@ nanDataEngineNDPEAttrLength(IN struct ADAPTER *prAdapter,
 		if (nanDataEngineNDPECheck(prAdapter, prNDP->fgSupportNDPE) ==
 		    FALSE) {
 			DBGLOG(NAN, INFO,
-				"[%s] Do not carry NDPE Attr. fgSupportNDPE %d nanGetFeatureNDPE %d\n",
-				 __func__,
+				"Do not carry NDPE Attr. fgSupportNDPE %d nanGetFeatureNDPE %d\n",
 				prNDP->fgSupportNDPE,
 				nanGetFeatureNDPE(prAdapter));
 			return 0;
 		}
 
 		DBGLOG(NAN, INFO,
-		   "[%s] Append AppInfoLen = %d, fgIpv6 = %d\n",
-		   __func__,
+		   "Append AppInfoLen = %d, fgIpv6 = %d\n",
 		   prNDP->u2AppInfoLen,
 		   prNDP->fgCarryIPV6);
 
@@ -3709,7 +3700,7 @@ nanDataEngineSetupStaRec(IN struct ADAPTER *prAdapter,
 		ucPeerBW = 20;
 		/* whsu */
 		u4PeerNSS = prBssInfo->ucOpRxNss;
-
+		u4PeerNSS = 1;
 		DBGLOG(NAN, INFO, "[%s] Use Default PeerBW %d , PeerNSS %d\n",
 		       __func__, ucPeerBW, u4PeerNSS);
 	}
@@ -4145,16 +4136,16 @@ nanDataEngineEnrollNMIContext(IN struct ADAPTER *prAdapter,
 	    WLAN_STATUS_SUCCESS)
 		return WLAN_STATUS_FAILURE;
 
+	/* Notify scheduler */
+	nanSchedCmdMapStaRecord(prAdapter, prNDL->aucPeerMacAddr,
+				NAN_BSS_INDEX_BAND0,
+				prNdpCxt->prNanStaRec->ucIndex, prNdpCxt->ucId);
+
 	/* update SA with strongest security */
 	if (!prNdpCxt->prNanStaRec) {
 		DBGLOG(NAN, ERROR, "[%s] prNanStaRec error\n", __func__);
 		return WLAN_STATUS_FAILURE;
 	}
-
-	/* Notify scheduler */
-	nanSchedCmdMapStaRecord(prAdapter, prNDL->aucPeerMacAddr,
-				NAN_BSS_INDEX_BAND0,
-				prNdpCxt->prNanStaRec->ucIndex, prNdpCxt->ucId);
 
 	if (fgSecurityRequired == FALSE)
 		nanSecResetTk(prNdpCxt->prNanStaRec);
@@ -4317,14 +4308,8 @@ nanDataEngineUnrollNMIContext(IN struct ADAPTER *prAdapter,
 
 		prNdpCxt->fgValid = FALSE;
 	} else {
-		if (prNdpCxt->prNanStaRec) {
-			nicTxFreeDescTemplate(prAdapter, prNdpCxt->prNanStaRec);
-			nicTxGenerateDescTemplate(prAdapter,
-				prNdpCxt->prNanStaRec);
-		} else {
-			DBGLOG(NAN, WARN,
-				"[%s] prNanStaRec = NULL\n", __func__);
-		}
+		nicTxFreeDescTemplate(prAdapter, prNdpCxt->prNanStaRec);
+		nicTxGenerateDescTemplate(prAdapter, prNdpCxt->prNanStaRec);
 	}
 
 #if (ENABLE_NDP_UT_LOG == 1)
@@ -4662,14 +4647,8 @@ nanDataEngineUnrollNDPContext(IN struct ADAPTER *prAdapter,
 
 		prNdpCxt->fgValid = FALSE;
 	} else {
-		if (prNdpCxt->prNanStaRec) {
-			nicTxFreeDescTemplate(prAdapter, prNdpCxt->prNanStaRec);
-			nicTxGenerateDescTemplate(prAdapter,
-				prNdpCxt->prNanStaRec);
-		} else {
-			DBGLOG(NAN, WARN,
-					"[%s] prNanStaRec = NULL\n", __func__);
-		}
+		nicTxFreeDescTemplate(prAdapter, prNdpCxt->prNanStaRec);
+		nicTxGenerateDescTemplate(prAdapter, prNdpCxt->prNanStaRec);
 	}
 	prNDP->prContext = NULL;
 

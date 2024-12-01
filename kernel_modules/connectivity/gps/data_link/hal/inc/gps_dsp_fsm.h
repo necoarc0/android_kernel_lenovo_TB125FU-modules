@@ -113,3 +113,4 @@ bool gps_dsp_state_is(enum gps_dsp_state_t state, enum gps_dl_link_id_enum link_
 void gps_dsp_fsm(enum gps_dsp_event_t evt, enum gps_dl_link_id_enum link_id);
 
 #endif /* _GPS_DSP_FSM_H_ */
+

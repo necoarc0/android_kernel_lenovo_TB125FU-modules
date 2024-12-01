@@ -20,3 +20,4 @@ void gps_each_link_rec_reset(enum gps_dl_link_id_enum link_id);
 void gps_each_link_rec_force_dump(enum gps_dl_link_id_enum link_id);
 
 #endif /* _GPS_DL_HIST_REC_H */
+

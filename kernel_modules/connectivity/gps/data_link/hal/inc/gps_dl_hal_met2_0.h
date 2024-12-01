@@ -58,3 +58,4 @@ extern struct gps_dl_iomem_addr_map_entry g_gps_dl_res_emi;
 extern struct gps_debug_met_contex g_gps_debug_met_contex;
 
 #endif /* _GPS_MET_2_0_H */
+

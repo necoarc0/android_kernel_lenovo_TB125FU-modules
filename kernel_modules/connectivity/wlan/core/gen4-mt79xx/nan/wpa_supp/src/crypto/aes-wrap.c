@@ -1,15 +1,6 @@
-/* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
-
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (c) 2020 MediaTek Inc.
- */
-/*
- * AES Key Wrap Algorithm (RFC3394)
- *
- * Copyright (c) 2003-2007, Jouni Malinen <j@w1.fi>
- *
- * This software may be distributed under the terms of the BSD license.
- * See README for more details.
+ * Copyright (c) 2021 MediaTek Inc.
  */
 
 #include "wpa_supp/FourWayHandShake.h"

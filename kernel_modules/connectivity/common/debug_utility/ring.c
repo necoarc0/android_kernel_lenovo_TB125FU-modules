@@ -136,3 +136,4 @@ void _ring_write_commit(struct ring_segment *seg, struct ring *ring)
 	/* ring_dump(__func__, ring); */
 	/* ring_dump_segment(__func__, seg); */
 }
+

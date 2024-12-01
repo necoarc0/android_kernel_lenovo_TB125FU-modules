@@ -266,3 +266,4 @@ void gps_dl_link_reset_ack(enum gps_dl_link_id_enum link_id);
 void gps_dl_link_on_post_conn_reset(enum gps_dl_link_id_enum link_id);
 
 #endif /* _GPS_EACH_LINK_H */
+

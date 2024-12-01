@@ -67,3 +67,4 @@
 #define GPS_L5_USRT_APB_MCU_D2A0_D2A_0_SHFT                    0
 
 #endif /* __GPS_L5_USRT_APB_REGS_H__ */
+

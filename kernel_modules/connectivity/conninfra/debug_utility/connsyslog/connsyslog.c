@@ -1603,3 +1603,4 @@ int connsys_dedicated_log_set_ap_state(int state)
 
 	return 0;
 }
+

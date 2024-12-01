@@ -148,3 +148,5 @@ int msg_evt_test(void)
 	pr_info("[%s] test PASS\n", __func__);
 	return 0;
 }
+
+

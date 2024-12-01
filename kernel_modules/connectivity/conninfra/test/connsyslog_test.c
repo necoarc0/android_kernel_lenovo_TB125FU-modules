@@ -110,3 +110,4 @@ int connlog_test_deinit(void)
 	connsys_log_deinit(CONN_DEBUG_TYPE_WIFI);
 	return 0;
 }
+

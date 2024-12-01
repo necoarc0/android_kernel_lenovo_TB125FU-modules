@@ -19,3 +19,4 @@ bool gps_dl_hal_comp_buf_match(unsigned char *data_buf, unsigned int data_len,
 	unsigned char *golden_buf, unsigned int golden_len, unsigned int data_shift);
 
 #endif /* _GPS_DL_LIB_MISC_H */
+

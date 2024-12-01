@@ -102,3 +102,4 @@ struct consys_emi_addr_info* emi_mng_get_phy_addr(void);
 */
 
 #endif				/* _PLATFORM_EMI_MNG_H_ */
+

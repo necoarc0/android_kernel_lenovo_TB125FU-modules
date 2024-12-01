@@ -334,3 +334,4 @@ void asicWakeUpWiFi(IN struct ADAPTER *prAdapter)
 		HAL_LP_OWN_CLR(prAdapter, &fgResult);
 }
 #endif /* _HIF_PCIE || _HIF_AXI */
+

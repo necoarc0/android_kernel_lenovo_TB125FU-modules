@@ -1,54 +1,7 @@
-/******************************************************************************
- *
- * This file is provided under a dual license.  When you use or
- * distribute this software, you may choose to be licensed under
- * version 2 of the GNU General Public License ("GPLv2 License")
- * or BSD License.
- *
- * GPLv2 License
- *
- * Copyright(C) 2016 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * BSD LICENSE
- *
- * Copyright(C) 2016 MediaTek Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2016 MediaTek Inc.
+ */
 /*
  * Id: //Department/DaVinci/BRANCHES/MT6620_WIFI_DRIVER_V2_3/mgmt/cnm_mem.c#2
  */
@@ -153,11 +106,7 @@ static void cnmStaRecCmdHeContentFill(
 	struct STA_RECORD *prStaRec,
 	struct CMD_UPDATE_STA_RECORD *prCmdContent);
 #endif
-#if (CFG_SUPPORT_802_11BE == 1)
-static void cnmStaRecCmdEhtContentFill(
-	struct STA_RECORD *prStaRec,
-	struct CMD_UPDATE_STA_RECORD *prCmdContent);
-#endif
+
 
 /*******************************************************************************
  *                              F U N C T I O N S
@@ -178,12 +127,7 @@ struct MSDU_INFO *cnmPktAllocWrapper(struct ADAPTER *prAdapter,
 {
 	struct MSDU_INFO *prMsduInfo;
 
-#if CFG_DBG_MGT_BUF
-	prMsduInfo = cnmPktAllocX(prAdapter, u4Length, pucStr);
-#else
 	prMsduInfo = cnmPktAlloc(prAdapter, u4Length);
-#endif
-
 	log_dbg(MEM, LOUD, "Alloc MSDU_INFO[0x%p] by [%s]\n",
 		prMsduInfo, pucStr);
 
@@ -217,12 +161,7 @@ void cnmPktFreeWrapper(struct ADAPTER *prAdapter, struct MSDU_INFO *prMsduInfo,
  * \return none
  */
 /*----------------------------------------------------------------------------*/
-#if CFG_DBG_MGT_BUF
-struct MSDU_INFO *cnmPktAllocX(struct ADAPTER *prAdapter, uint32_t u4Length,
-	uint8_t *fileAndLine)
-#else
 struct MSDU_INFO *cnmPktAlloc(struct ADAPTER *prAdapter, uint32_t u4Length)
-#endif
 {
 	struct MSDU_INFO *prMsduInfo;
 	struct QUE *prQueList;
@@ -239,15 +178,9 @@ struct MSDU_INFO *cnmPktAlloc(struct ADAPTER *prAdapter, uint32_t u4Length)
 
 	if (prMsduInfo) {
 		if (u4Length) {
-#if CFG_DBG_MGT_BUF
-			prMsduInfo->prPacket = cnmMemAllocX(prAdapter,
-				RAM_TYPE_BUF, u4Length, fileAndLine);
-#else
 			prMsduInfo->prPacket = cnmMemAlloc(prAdapter,
 				RAM_TYPE_BUF, u4Length);
-#endif
 			prMsduInfo->eSrc = TX_PACKET_MGMT;
-			prMsduInfo->ucControlFlag = 0;
 
 			if (prMsduInfo->prPacket == NULL) {
 				KAL_ACQUIRE_SPIN_LOCK(prAdapter,
@@ -617,6 +550,9 @@ void cnmStaRecInit(struct ADAPTER *prAdapter)
 
 		prStaRec->ucIndex = (uint8_t) i;
 		prStaRec->fgIsInUse = FALSE;
+#if DSCP_SUPPORT
+		prStaRec->qosMapSet = NULL;
+#endif
 	}
 }
 
@@ -653,25 +589,30 @@ struct STA_RECORD *cnmStaRecAlloc(struct ADAPTER *prAdapter,
 			for (k = 0; k < TID_NUM + 1; k++) {
 				prStaRec->au2CachedSeqCtrl[k] = 0xFFFF;
 				prStaRec->afgIsIgnoreAmsduDuplicate[k] = FALSE;
-#if CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION
+			}
+
+#if CFG_SUPPORT_AMSDU_ATTACK_DETECTION
+			for (k = 0; k < TID_NUM + 1; k++) {
 				prStaRec->au2AmsduInvalidSN[k] = 0xFFFF;
 				prStaRec->afgIsAmsduInvalid[k] = FALSE;
-#endif /* CFG_SUPPORT_FRAG_AGG_ATTACK_DETECTION */
 			}
+#endif
 
 			/* Initialize SW TX queues in STA_REC */
 			for (k = 0; k < STA_WAIT_QUEUE_NUM; k++)
 				LINK_INITIALIZE(&prStaRec->arStaWaitQueue[k]);
 
-			LINK_INITIALIZE(&prStaRec->rMscsMonitorList);
-			LINK_INITIALIZE(&prStaRec->rMscsTcpMonitorList);
-			DBGLOG(MEM, WARN, "LINK_INITIALIZE list: %p\n",
-						&prStaRec->rMscsMonitorList);
 #if CFG_ENABLE_PER_STA_STATISTICS && CFG_ENABLE_PKT_LIFETIME_PROFILE
 			prStaRec->u4TotalTxPktsNumber = 0;
 			prStaRec->u4TotalTxPktsTime = 0;
 			prStaRec->u4TotalRxPktsNumber = 0;
 			prStaRec->u4MaxTxPktsTime = 0;
+#endif
+#if CFG_AP_80211KVR_INTERFACE
+			prStaRec->u8TotalTxBytes = 0;
+			prStaRec->u8TotalRxBytes = 0;
+			prStaRec->u8TotalRxPkts = 0;
+			prStaRec->u8GetDataRateTime = 0;
 #endif
 
 			for (k = 0; k < NUM_OF_PER_STA_TX_QUEUES; k++) {
@@ -679,6 +620,9 @@ struct STA_RECORD *cnmStaRecAlloc(struct ADAPTER *prAdapter,
 					&prStaRec->arTxQueue[k]);
 				QUEUE_INITIALIZE(
 					&prStaRec->arPendingTxQueue[k]);
+				/* Default should be no-TX.
+				 * Switch when allow to TX.
+				 */
 				prStaRec->aprTargetQueue[k]
 					= &prStaRec->arPendingTxQueue[k];
 			}
@@ -688,9 +632,6 @@ struct STA_RECORD *cnmStaRecAlloc(struct ADAPTER *prAdapter,
 			prStaRec->u4MaxMpduLen = 0;
 			prStaRec->u4MinMpduLen = 0;
 
-#if DSCP_SUPPORT
-			qosMapSetInit(prStaRec);
-#endif
 			break;
 		}
 	}
@@ -698,12 +639,8 @@ struct STA_RECORD *cnmStaRecAlloc(struct ADAPTER *prAdapter,
 	/* Sync to chip to allocate WTBL resource */
 	if (i < CFG_STA_REC_NUM) {
 		COPY_MAC_ADDR(prStaRec->aucMacAddr, pucMacAddr);
-		if (secPrivacySeekForEntry(prAdapter, prStaRec)) {
-			cnmStaSendUpdateCmd(prAdapter, prStaRec, NULL, FALSE);
-#if CFG_SUPPORT_LIMITED_PKT_PID
-			nicTxInitPktPID(prAdapter, prStaRec->ucWlanIndex);
-#endif /* CFG_SUPPORT_LIMITED_PKT_PID */
-		}
+		if (secPrivacySeekForEntry(prAdapter, prStaRec))
+			cnmStaSendUpdateCmd(prAdapter, prStaRec, FALSE);
 #if DBG
 		else {
 			prStaRec->fgIsInUse = FALSE;
@@ -714,6 +651,11 @@ struct STA_RECORD *cnmStaRecAlloc(struct ADAPTER *prAdapter,
 	} else {
 		prStaRec = NULL;
 	}
+
+	/* remove pending msdu when sta_rec alloc */
+	if (prStaRec)
+		nicFreePendingTxMsduInfo(prAdapter,
+			prStaRec->ucWlanIndex, MSDU_REMOVE_BY_WLAN_INDEX);
 
 	return prStaRec;
 }
@@ -736,22 +678,21 @@ void cnmStaRecFree(struct ADAPTER *prAdapter, struct STA_RECORD *prStaRec)
 	if (!prStaRec)
 		return;
 
-	log_dbg(CNM, INFO, "cnmStaRecFree %d\n", prStaRec->ucIndex);
+	log_dbg(RSN, INFO, "cnmStaRecFree %d\n", prStaRec->ucIndex);
 
 	ucStaRecIndex = prStaRec->ucIndex;
 	ucBssIndex = prStaRec->ucBssIndex;
 
-	if (prStaRec->fgIsInUse) {
-		nicFreePendingTxMsduInfo(prAdapter, prStaRec->ucWlanIndex,
-				MSDU_REMOVE_BY_WLAN_INDEX);
+	cnmStaRoutinesForAbort(prAdapter, prStaRec);
 
-		cnmStaRoutinesForAbort(prAdapter, prStaRec);
-
-		cnmStaSendRemoveCmd(prAdapter, STA_REC_CMD_ACTION_STA,
-			ucStaRecIndex, ucBssIndex);
-	} else {
-		log_dbg(CNM, ERROR, "prStaRec is not in use\n");
+	cnmStaSendRemoveCmd(prAdapter, STA_REC_CMD_ACTION_STA,
+		ucStaRecIndex, ucBssIndex);
+#if DSCP_SUPPORT
+	if (prStaRec->qosMapSet) {
+		QosMapSetRelease(prStaRec);
+		prStaRec->qosMapSet = NULL;
 	}
+#endif
 }
 
 /*----------------------------------------------------------------------------*/
@@ -774,6 +715,9 @@ static void cnmStaRoutinesForAbort(struct ADAPTER *prAdapter,
 	/* To do: free related resources, e.g. timers, buffers, etc */
 	cnmTimerStopTimer(prAdapter, &prStaRec->rTxReqDoneOrRxRespTimer);
 	cnmTimerStopTimer(prAdapter, &prStaRec->rDeauthTxDoneTimer);
+#if CFG_AP_80211V_SUPPORT
+	cnmTimerStopTimer(prAdapter, &prStaRec->rBTMReqDisassocTimer);
+#endif /* CFG_AP_80211V_SUPPORT */
 	prStaRec->fgTransmitKeyExist = FALSE;
 
 	prStaRec->fgSetPwrMgtBit = FALSE;
@@ -845,22 +789,6 @@ void cnmStaFreeAllStaByNetwork(struct ADAPTER *prAdapter, uint8_t ucBssIndex,
 #endif
 }
 
-struct STA_RECORD *cnmGetStaRecByIndexWithoutInUseCheck(
-	struct ADAPTER *prAdapter,
-	uint8_t ucIndex)
-{
-	struct STA_RECORD *prStaRec;
-
-	ASSERT(prAdapter);
-
-	if (ucIndex < CFG_STA_REC_NUM)
-		prStaRec = &prAdapter->arStaRec[ucIndex];
-	else
-		prStaRec = NULL;
-
-	return prStaRec;
-}
-
 /*----------------------------------------------------------------------------*/
 /*!
  * \brief
@@ -875,7 +803,12 @@ struct STA_RECORD *cnmGetStaRecByIndex(struct ADAPTER *prAdapter,
 {
 	struct STA_RECORD *prStaRec;
 
-	prStaRec = cnmGetStaRecByIndexWithoutInUseCheck(prAdapter, ucIndex);
+	ASSERT(prAdapter);
+
+	if (ucIndex < CFG_STA_REC_NUM)
+		prStaRec = &prAdapter->arStaRec[ucIndex];
+	else
+		prStaRec = NULL;
 
 	if (prStaRec && prStaRec->fgIsInUse == FALSE)
 		prStaRec = NULL;
@@ -972,7 +905,7 @@ void cnmStaRecChangeState(struct ADAPTER *prAdapter, struct STA_RECORD *prStaRec
 	}
 	prStaRec->ucStaState = ucNewState;
 
-	cnmStaSendUpdateCmd(prAdapter, prStaRec, NULL, fgNeedResp);
+	cnmStaSendUpdateCmd(prAdapter, prStaRec, fgNeedResp);
 
 #if 1	/* Marked for MT6630 */
 #if CFG_ENABLE_WIFI_DIRECT
@@ -1030,7 +963,7 @@ static void cnmStaRecHandleEventPkt(struct ADAPTER *prAdapter,
  */
 /*----------------------------------------------------------------------------*/
 void cnmStaSendUpdateCmd(struct ADAPTER *prAdapter, struct STA_RECORD *prStaRec,
-	struct TXBF_PFMU_STA_INFO *prTxBfPfmuStaInfo, u_int8_t fgNeedResp)
+	 u_int8_t fgNeedResp)
 {
 	struct CMD_UPDATE_STA_RECORD *prCmdContent;
 	uint32_t rStatus;
@@ -1070,11 +1003,6 @@ void cnmStaSendUpdateCmd(struct ADAPTER *prAdapter, struct STA_RECORD *prStaRec,
 
 	/* Reset command buffer */
 	kalMemZero(prCmdContent, sizeof(struct CMD_UPDATE_STA_RECORD));
-
-	if (prTxBfPfmuStaInfo) {
-		memcpy(&prCmdContent->u2PfmuId, prTxBfPfmuStaInfo,
-			sizeof(struct TXBF_PFMU_STA_INFO));
-	}
 
 	prCmdContent->ucStaIndex = prStaRec->ucIndex;
 	prCmdContent->ucStaType = (uint8_t) prStaRec->eStaType;
@@ -1164,25 +1092,13 @@ void cnmStaSendUpdateCmd(struct ADAPTER *prAdapter, struct STA_RECORD *prStaRec,
 	/* AMSDU in AMPDU global configuration */
 	prCmdContent->ucTxAmsduInAmpdu = prAdapter->rWifiVar.ucAmsduInAmpduTx;
 	prCmdContent->ucRxAmsduInAmpdu = prAdapter->rWifiVar.ucAmsduInAmpduRx;
-
-#if (CFG_SUPPORT_802_11BE == 1)
-	if (prStaRec->ucDesiredPhyTypeSet & PHY_TYPE_SET_802_11BE) {
-		/* EHT peer AMSDU in AMPDU configuration */
-		prCmdContent->ucTxAmsduInAmpdu &=
-			prAdapter->rWifiVar.ucEhtAmsduInAmpduTx;
-		prCmdContent->ucRxAmsduInAmpdu &=
-		prAdapter->rWifiVar.ucEhtAmsduInAmpduRx;
-	} else
-#endif
 #if (CFG_SUPPORT_802_11AX == 1)
-	/* prStaRec->ucDesiredPhyTypeSet firm in */
-		/* bssDetermineStaRecPhyTypeSet() in advance */
 	if (prStaRec->ucDesiredPhyTypeSet & PHY_TYPE_SET_802_11AX) {
 		/* HE peer AMSDU in AMPDU configuration */
 		prCmdContent->ucTxAmsduInAmpdu &=
 			prAdapter->rWifiVar.ucHeAmsduInAmpduTx;
 		prCmdContent->ucRxAmsduInAmpdu &=
-		prAdapter->rWifiVar.ucHeAmsduInAmpduRx;
+			prAdapter->rWifiVar.ucHeAmsduInAmpduRx;
 	} else
 #endif
 	if ((prStaRec->ucDesiredPhyTypeSet & PHY_TYPE_SET_802_11AC) ||
@@ -1202,14 +1118,6 @@ void cnmStaSendUpdateCmd(struct ADAPTER *prAdapter, struct STA_RECORD *prStaRec,
 
 	prCmdContent->u4TxMaxAmsduInAmpduLen
 		= prAdapter->rWifiVar.u4TxMaxAmsduInAmpduLen;
-#if (CFG_SUPPORT_802_11BE == 1)
-	if (prStaRec->ucDesiredPhyTypeSet & PHY_TYPE_SET_802_11BE) {
-		prCmdContent->rBaSize.rEhtBaSize.u2RxBaSize =
-				prAdapter->rWifiVar.u2RxEhtBaSize;
-		prCmdContent->rBaSize.rEhtBaSize.u2TxBaSize =
-				prAdapter->rWifiVar.u2TxEhtBaSize;
-	} else
-#endif
 #if (CFG_SUPPORT_802_11AX == 1)
 	if (prStaRec->ucDesiredPhyTypeSet & PHY_TYPE_SET_802_11AX) {
 		prCmdContent->rBaSize.rHeBaSize.u2RxBaSize =
@@ -1240,16 +1148,11 @@ void cnmStaSendUpdateCmd(struct ADAPTER *prAdapter, struct STA_RECORD *prStaRec,
 		prCmdContent->ucRtsPolicy = RTS_POLICY_LEGACY;
 
 #if (CFG_SUPPORT_802_11AX == 1)
-	if (fgEfuseCtrlAxOn == 1) {
 	cnmStaRecCmdHeContentFill(prStaRec, prCmdContent);
-	}
+#endif
 
 #if (CFG_SUPPORT_WIFI_6G == 1)
 	prCmdContent->u2He6gBandCapInfo = prStaRec->u2He6gBandCapInfo;
-#endif
-#endif
-#if (CFG_SUPPORT_802_11BE == 1)
-	cnmStaRecCmdEhtContentFill(prStaRec, prCmdContent);
 #endif
 
 	log_dbg(REQ, TRACE, "Update StaRec[%u] WIDX[%u] State[%u] Type[%u] BssIdx[%u] AID[%u]\n",
@@ -1572,7 +1475,7 @@ cnmPeerAdd(struct ADAPTER *prAdapter, void *pvSetBuffer,
 {
 	struct CMD_PEER_ADD *prCmd;
 	struct BSS_INFO *prBssInfo;
-	struct STA_RECORD *prStaRec, *prStaRecOfAp;
+	struct STA_RECORD *prStaRec;
 
 	/* sanity check */
 
@@ -1613,8 +1516,7 @@ cnmPeerAdd(struct ADAPTER *prAdapter, void *pvSetBuffer,
 		COPY_MAC_ADDR(prStaRec->aucMacAddr, prCmd->aucPeerMac);
 
 		prStaRec->u2BSSBasicRateSet = prBssInfo->u2BSSBasicRateSet;
-		prStaRec->ucDesiredPhyTypeSet
-			= prAdapter->rWifiVar.ucAvailablePhyTypeSet;
+
 		prStaRec->u2DesiredNonHTRateSet
 			= prAdapter->rWifiVar.ucAvailablePhyTypeSet;
 
@@ -1622,13 +1524,6 @@ cnmPeerAdd(struct ADAPTER *prAdapter, void *pvSetBuffer,
 			= prBssInfo->u2OperationalRateSet;
 		prStaRec->ucPhyTypeSet = prBssInfo->ucPhyTypeSet;
 		prStaRec->eStaType = prCmd->eStaType;
-
-		/* align setting with AP */
-		prStaRecOfAp = prBssInfo->prStaRecOfAP;
-		if (prStaRecOfAp) {
-			prStaRec->u2DesiredNonHTRateSet
-				= prStaRecOfAp->u2DesiredNonHTRateSet;
-		}
 
 		/* Init lowest rate to prevent CCK in 5G band */
 		nicTxUpdateStaRecDefaultRate(prAdapter, prStaRec);
@@ -1717,8 +1612,7 @@ cnmPeerUpdate(struct ADAPTER *prAdapter, void *pvSetBuffer,
 	prStaRec->u2AssocId = 0;		/* no use */
 	prStaRec->u2ListenInterval = 0;		/* unknown */
 	prStaRec->fgIsQoS = TRUE;
-	prStaRec->fgIsUapsdSupported
-		= ((1 << 4) & prCmd->aucExtCap[3]) ? TRUE : FALSE;
+	prStaRec->fgIsUapsdSupported = (prCmd->UapsdBitmap == 0) ? FALSE : TRUE;
 	prStaRec->u4TxBeamformingCap = 0;	/* no use */
 	prStaRec->ucAselCap = 0;		/* no use */
 	prStaRec->ucRCPI = 120;
@@ -1804,6 +1698,10 @@ cnmPeerUpdate(struct ADAPTER *prAdapter, void *pvSetBuffer,
 			if (!((eEncStatus == ENUM_ENCRYPTION3_ENABLED)
 				|| (eEncStatus == ENUM_ENCRYPTION3_KEY_ABSENT)
 				|| (eEncStatus == ENUM_ENCRYPTION_DISABLED)
+				|| (prConnSettings->u2WSCAssocInfoIELen)
+#if CFG_SUPPORT_WAPI
+				|| (prConnSettings->u2WapiAssocInfoIESz)
+#endif
 			    )) {
 
 				prStaRec->ucPhyTypeSet &= ~PHY_TYPE_BIT_HT;
@@ -1851,8 +1749,6 @@ cnmPeerUpdate(struct ADAPTER *prAdapter, void *pvSetBuffer,
 		prStaRec->ucDesiredPhyTypeSet |= PHY_TYPE_BIT_HT;
 		prStaRec->ucPhyTypeSet |= PHY_TYPE_BIT_HT;
 		prStaRec->u2HtCapInfo = prCmd->rHtCap.u2CapInfo;
-		if (!IS_FEATURE_ENABLED(prAdapter->rWifiVar.ucRxLdpc))
-			prStaRec->u2HtCapInfo &= ~HT_CAP_INFO_LDPC_CAP;
 		prStaRec->ucAmpduParam = prCmd->rHtCap.ucAmpduParamsInfo;
 		prStaRec->u2HtExtendedCap = prCmd->rHtCap.u2ExtHtCapInfo;
 		prStaRec->u4TxBeamformingCap = prCmd->rHtCap.u4TxBfCapInfo;
@@ -1931,19 +1827,6 @@ static void cnmStaRecCmdHeContentFill(
 		CPU_TO_LE16(prStaRec->u2HeRxMcsMapBW80P80);
 	prCmdContent->u2HeTxMcsMapBW80P80 =
 		CPU_TO_LE16(prStaRec->u2HeTxMcsMapBW80P80);
-}
-#endif
-
-#if (CFG_SUPPORT_802_11BE == 1)
-static void cnmStaRecCmdEhtContentFill(
-	struct STA_RECORD *prStaRec,
-	struct CMD_UPDATE_STA_RECORD *prCmdContent)
-{
-	prCmdContent->ucVersion = CMD_UPDATE_STAREC_VER1;
-	memcpy(prCmdContent->ucEhtMacCapInfo, prStaRec->ucEhtMacCapInfo,
-		EHT_MAC_CAP_BYTE_NUM);
-	memcpy(prCmdContent->ucEhtPhyCapInfo, prStaRec->ucEhtPhyCapInfo,
-		EHT_PHY_CAP_BYTE_NUM);
 }
 #endif
 

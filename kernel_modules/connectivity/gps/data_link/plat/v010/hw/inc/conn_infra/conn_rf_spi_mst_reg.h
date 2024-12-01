@@ -29,3 +29,4 @@
 #define CONN_RF_SPI_MST_REG_FM_CTRL_FM_RD_EXT_CNT_SHFT         0
 
 #endif /* __CONN_RF_SPI_MST_REG_REGS_H__ */
+

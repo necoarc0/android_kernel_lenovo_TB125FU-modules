@@ -1,54 +1,7 @@
-/******************************************************************************
- *
- * This file is provided under a dual license.  When you use or
- * distribute this software, you may choose to be licensed under
- * version 2 of the GNU General Public License ("GPLv2 License")
- * or BSD License.
- *
- * GPLv2 License
- *
- * Copyright(C) 2016 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * BSD LICENSE
- *
- * Copyright(C) 2016 MediaTek Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2016 MediaTek Inc.
+ */
 /*
  ** Id: //Department/DaVinci/BRANCHES/MT6620_WIFI_DRIVER_V2_3/nic/nic_tx.c#2
  */
@@ -82,6 +35,10 @@
  *                             D A T A   T Y P E S
  *******************************************************************************
  */
+enum ENUM_SPE_SEL_TYPE {
+	ENUM_SPE_SEL_BY_TXD = 0,
+	ENUM_SPE_SEL_BY_WTBL = 1
+};
 
 /*******************************************************************************
  *                            P U B L I C   D A T A
@@ -300,11 +257,20 @@ void nic_txd_v2_compose(
 	struct HW_MAC_CONNAC2X_TX_DESC *prTxDesc;
 	struct STA_RECORD *prStaRec;
 	struct BSS_INFO *prBssInfo;
-	uint8_t ucEtherTypeOffsetInWord;
+	u_int8_t ucEtherTypeOffsetInWord;
 	u_int32_t u4TxDescAndPaddingLength;
-	uint8_t ucWmmQueSet, ucTarQueue, ucTarPort;
+	u_int8_t ucTarQueue;
+#if (CFG_SUPPORT_ALTX_MGMT == 1)
+	u_int8_t ucTarPort;
+#endif
+
 #if ((CFG_SISO_SW_DEVELOP == 1) || (CFG_SUPPORT_SPE_IDX_CONTROL == 1))
 	enum ENUM_WF_PATH_FAVOR_T eWfPathFavor;
+#endif
+	struct WLAN_MAC_HEADER *prWlanHeader = NULL;
+#if CFG_SUPPORT_TX_MGMT_USE_DATAQ
+	struct sk_buff *prSkb = NULL;
+	uint32_t u4TxHeadRoomSize;
 #endif
 
 	prTxDesc = (struct HW_MAC_CONNAC2X_TX_DESC *) prTxDescBuffer;
@@ -330,35 +296,30 @@ void nic_txd_v2_compose(
 		prTxDesc,
 		ucEtherTypeOffsetInWord);
 
+	ucTarQueue = nicTxGetTxDestQIdxByTc(prMsduInfo->ucTC);
 	ucTarPort = nicTxGetTxDestPortIdxByTc(prMsduInfo->ucTC);
-#if defined(SOC3_0)
+#if (CFG_TX_RSRC_WMM_ENHANCE == 1)
+	/* Note for SDIO resource ctrl
+	* There are cases for TargetQ update
+	* 1. ResV1 + TC <= TC4 : WmmSet may greater than 0, go to update
+	* 2. ResV2 + TC <= TC4 : WmmSet always 0
+	* 3. ResV2 + TC >   TC4 : TargetQ prepared in nicTxGetTxDestQIdxByTc()
+	*/
+	if ((ucTarPort == PORT_INDEX_LMAC) && (prMsduInfo->ucTC <= TC4_INDEX))
+#else
+	if (ucTarPort == PORT_INDEX_LMAC)
+#endif
+	{
+		ucTarQueue += (prBssInfo->ucWmmQueSet * WMM_AC_INDEX_NUM);
+	}
+
+#if (CFG_SUPPORT_ALTX_MGMT == 1)
 	if (ucTarPort == PORT_INDEX_MCU &&
 		prMsduInfo->ucControlFlag & MSDU_CONTROL_FLAG_FORCE_TX) {
 		/* To MCU packet with always tx flag */
 		ucTarQueue = MAC_TXQ_ALTX_0_INDEX;
-	} else
-#endif
-	{
-		ucWmmQueSet = prBssInfo->ucWmmQueSet;
-#if CFG_SUPPORT_DROP_INVALID_MSDUINFO
-		if (fgIsTemplate != TRUE
-			&& prMsduInfo->ucPacketType == TX_PACKET_TYPE_DATA
-			&& ucWmmQueSet != prMsduInfo->ucWmmQueSet) {
-			prMsduInfo->fgDrop = TRUE;
-			DBGLOG(RSN, ERROR,
-				"WmmQueSet mismatch[%u,%u,%u,%u]\n",
-				prMsduInfo->ucBssIndex,
-				prMsduInfo->ucStaRecIndex,
-				ucWmmQueSet,
-				prMsduInfo->ucWmmQueSet);
-		}
-#endif /* CFG_SUPPORT_DROP_INVALID_MSDUINFO */
-
-		ucTarQueue = nicTxGetTxDestQIdxByTc(prMsduInfo->ucTC);
-		if (ucTarPort == PORT_INDEX_LMAC)
-			ucTarQueue +=
-				(ucWmmQueSet * WMM_AC_INDEX_NUM);
 	}
+#endif
 
 #if (CFG_SUPPORT_DMASHDL_SYSDVT)
 	if (prMsduInfo->ucPktType == ENUM_PKT_ICMP) {
@@ -398,8 +359,6 @@ void nic_txd_v2_compose(
 	HAL_MAC_CONNAC2X_TXD_SET_WLAN_INDEX(
 		prTxDesc, prMsduInfo->ucWlanIndex);
 
-	HAL_MAC_CONNAC2X_TXD_SET_VTA(prTxDesc, 1);
-
 	/* Header format */
 	if (prMsduInfo->fgIs802_11) {
 		HAL_MAC_CONNAC2X_TXD_SET_HEADER_FORMAT(
@@ -425,8 +384,7 @@ void nic_txd_v2_compose(
 		/* PF bit will be set in nicTxFillDescByPktOption() */
 		if ((prStaRec
 			&& prStaRec->fgTransmitKeyExist) || fgIsTemplate) {
-			DBGLOG_LIMITED(RSN, TRACE,
-				"Set MSDU_OPT_PROTECTED_FRAME\n");
+			DBGLOG(RSN, TRACE, "Set MSDU_OPT_PROTECTED_FRAME\n");
 			nicTxConfigPktOption(
 				prMsduInfo, MSDU_OPT_PROTECTED_FRAME, TRUE);
 
@@ -443,6 +401,9 @@ void nic_txd_v2_compose(
 			nicTxConfigPktOption(
 				prMsduInfo, MSDU_OPT_PROTECTED_FRAME, TRUE);
 			DBGLOG(RSN, LOUD, "Protect BMC frame!\n");
+		} else { /* UC with pairwise key not ready case */
+			nicTxConfigPktOption(
+				prMsduInfo, MSDU_OPT_PROTECTED_FRAME, FALSE);
 		}
 	}
 #if (UNIFIED_MAC_TX_FORMAT == 1)
@@ -471,10 +432,24 @@ void nic_txd_v2_compose(
 
 	/* Type */
 	if (prMsduInfo->fgIs802_11) {
-		struct WLAN_MAC_HEADER *prWlanHeader =
-			(struct WLAN_MAC_HEADER *)
-			((unsigned long)
-			(prMsduInfo->prPacket) + MAC_TX_RESERVED_FIELD);
+#if CFG_SUPPORT_TX_MGMT_USE_DATAQ
+		if (prMsduInfo->ucPktType == ENUM_PKT_802_11_MGMT) {
+			u4TxHeadRoomSize = NIC_TX_DESC_AND_PADDING_LENGTH +
+			   prAdapter->chip_info->txd_append_size;
+			prSkb = (struct sk_buff *)prMsduInfo->prPacket;
+			prWlanHeader =
+				(struct WLAN_MAC_HEADER *)((unsigned long)
+				(prSkb->data + u4TxHeadRoomSize));
+
+			if (prMsduInfo->u4Option & MSDU_OPT_PROTECTED_FRAME)
+				prWlanHeader->u2FrameCtrl |=
+					MASK_FC_PROTECTED_FRAME;
+		} else
+#endif
+			prWlanHeader =
+				(struct WLAN_MAC_HEADER *)
+				((unsigned long)
+				(prMsduInfo->prPacket) + MAC_TX_RESERVED_FIELD);
 
 		HAL_MAC_CONNAC2X_TXD_SET_TYPE(
 			prTxDesc,
@@ -593,14 +568,18 @@ void nic_txd_v2_compose(
 	case MSDU_RATE_MODE_MANUAL_DESC:
 		HAL_MAC_TX_DESC_SET_DW(
 			prTxDesc, 6, 1, &prMsduInfo->u4FixedRateOption);
-#if (CFG_SISO_SW_DEVELOP == 1 || CFG_SUPPORT_SPE_IDX_CONTROL == 1)
+#if ((CFG_SISO_SW_DEVELOP == 1) || (CFG_SUPPORT_SPE_IDX_CONTROL == 1))
+		eWfPathFavor = wlanGetAntPathType(
+				prAdapter,
+				ENUM_WF_NON_FAVOR,
+				prBssInfo->ucBssIndex);
 		/* Update spatial extension index setting */
-		eWfPathFavor = wlanGetAntPathType(prAdapter, ENUM_WF_NON_FAVOR);
 		HAL_MAC_CONNAC2X_TXD_SET_SPE_IDX(
 			prTxDesc,
 			wlanGetSpeIdx(prAdapter, prBssInfo->ucBssIndex,
-				eWfPathFavor));
+			eWfPathFavor));
 #endif
+		/* when FR=1, SPE index follow TXD's value */
 		HAL_MAC_CONNAC2X_TXD_SET_SPE_IDX_SEL(prTxDesc,
 			ENUM_SPE_SEL_BY_TXD);
 		HAL_MAC_CONNAC2X_TXD_SET_FIXED_RATE_MODE_TO_DESC(prTxDesc);

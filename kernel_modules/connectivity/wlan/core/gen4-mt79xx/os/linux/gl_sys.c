@@ -58,7 +58,6 @@
 static struct GLUE_INFO *g_prGlueInfo;
 static struct kobject *wifi_kobj;
 static uint8_t aucMacAddrOverride[] = "FF:FF:FF:FF:FF:FF";
-static uint8_t aucDefaultFWVersion[] = "Unknown";
 static u_int8_t fgIsMacAddrOverride = FALSE;
 static int32_t g_i4PM = -1;
 static char acVerInfo[MTK_INFO_MAX_SIZE];
@@ -243,7 +242,7 @@ void sysCreateMacAddr(void)
 
 		kalSnprintf(aucMacAddrOverride,
 			sizeof(aucMacAddrOverride),
-			"%pM",
+			MACSTR,
 			MAC2STR(rMacAddr));
 
 		DBGLOG(INIT, TRACE,
@@ -307,7 +306,8 @@ void sysCreateWifiVer(void)
 
 	char aucDriverVersionStr[] = STR(NIC_DRIVER_MAJOR_VERSION) "_"
 		STR(NIC_DRIVER_MINOR_VERSION) "_"
-		STR(NIC_DRIVER_SERIAL_VERSION);
+		STR(NIC_DRIVER_SERIAL_VERSION) "-"
+		DRIVER_BUILD_DATE;
 	uint16_t u2NvramVer = 0;
 	uint8_t ucOffset = 0;
 
@@ -329,8 +329,7 @@ void sysCreateWifiVer(void)
 	else {
 		ucOffset += kalSnprintf(acVerInfo + ucOffset
 			, MTK_INFO_MAX_SIZE - ucOffset
-			, "FW_VER: %s\n"
-			, aucDefaultFWVersion);
+			, "FW_VER: Unknown\n");
 	}
 
 	if (g_prGlueInfo) {
@@ -564,4 +563,67 @@ void sysMacAddrOverride(uint8_t *prMacAddr)
 		MAC2STR(prMacAddr));
 }
 
+#endif
+
+#if (CFG_SUPPORT_SNIFFER_RADIOTAP == 1)
+static struct dentry *dbgFsDir;
+
+static int debugfs_u8_get(void *data, uint64_t *val)
+{
+	*val = *(uint8_t *)data;
+	return 0;
+}
+
+static int debugfs_u8_set(void *data, uint64_t val)
+{
+	*(uint8_t *)data = val;
+	return 0;
+}
+
+DEFINE_SIMPLE_ATTRIBUTE(fops_u8, debugfs_u8_get, debugfs_u8_set, "%llu\n");
+
+static int debugfs_u16_get(void *data, uint64_t *val)
+{
+	*val = *(uint16_t *)data;
+	return 0;
+}
+
+static int debugfs_u16_set(void *data, uint64_t val)
+{
+	*(uint16_t *)data = val;
+	return 0;
+}
+
+DEFINE_SIMPLE_ATTRIBUTE(fops_u16, debugfs_u16_get, debugfs_u16_set, "%llu\n");
+
+int32_t sysCreateMonDbgFs(struct GLUE_INFO *prGlueInfo)
+{
+	struct dentry *dbgFsFile;
+
+	dbgFsDir = debugfs_create_dir("mtk_mon_dbgfs", NULL);
+	if (!dbgFsDir) {
+		DBGLOG(INIT, ERROR,
+				"dbgFsDir is null for mtk_mon_dbgfs\n");
+		return -1;
+	}
+
+	/* /sys/kernel/debug/mtk_mon_dbgfs/hemu_aid, mode: wr */
+	dbgFsFile = debugfs_create_file("hemu_aid",
+		0666, dbgFsDir, &prGlueInfo->u2Aid, &fops_u16);
+
+	/* /sys/kernel/debug/mtk_mon_dbgfs/band_idx, mode: wr */
+	dbgFsFile = debugfs_create_file("band_idx",
+		0666, dbgFsDir, &prGlueInfo->ucBandIdx, &fops_u8);
+
+	/* /sys/kernel/debug/mtk_mon_dbgfs/drop_fcs_err, mode: wr */
+	dbgFsFile = debugfs_create_file("drop_fcs_err",
+		0666, dbgFsDir, &prGlueInfo->fgDropFcsErrorFrame, &fops_u8);
+
+	return 0;
+}
+
+void sysRemoveMonDbgFs(void)
+{
+	debugfs_remove_recursive(dbgFsDir);
+}
 #endif

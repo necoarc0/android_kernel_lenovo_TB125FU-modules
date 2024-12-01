@@ -43,3 +43,4 @@ void gps_dl_test_mask_hasdata_irq_set(enum gps_dl_link_id_enum link_id, bool mas
 bool gps_dl_test_mask_hasdata_irq_get(enum gps_dl_link_id_enum link_id);
 
 #endif /* _GPS_DL_SUBSYS_RESET_H */
+

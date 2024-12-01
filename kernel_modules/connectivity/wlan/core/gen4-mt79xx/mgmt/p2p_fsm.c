@@ -1,54 +1,7 @@
-/******************************************************************************
- *
- * This file is provided under a dual license.  When you use or
- * distribute this software, you may choose to be licensed under
- * version 2 of the GNU General Public License ("GPLv2 License")
- * or BSD License.
- *
- * GPLv2 License
- *
- * Copyright(C) 2016 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * BSD LICENSE
- *
- * Copyright(C) 2016 MediaTek Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2016 MediaTek Inc.
+ */
 /*
  ** Id: //Department/DaVinci/TRUNK/WiFi_P2P_Driver/mgmt/p2p_fsm.c#61
  */
@@ -126,8 +79,10 @@ static u_int8_t p2pFsmUseRoleIf(IN struct ADAPTER *prAdapter,
 			fgUseRoleInterface = TRUE;
 			if (prBssInfo->eIftype != IFTYPE_P2P_CLIENT &&
 				prBssInfo->eIftype != IFTYPE_P2P_GO &&
-				!prAdapter->rWifiVar.prP2PConnSettings
-				[prBssInfo->u4PrivateData]->fgIsApMode) {
+				!p2pFuncIsAPMode(
+				prAdapter->rWifiVar
+				.prP2PConnSettings
+				[prBssInfo->u4PrivateData])) {
 				DBGLOG(P2P, TRACE,
 					"force use dev interface.\n");
 				fgUseRoleInterface = FALSE;
@@ -167,13 +122,6 @@ void p2pFsmRunEventScanRequest(IN struct ADAPTER *prAdapter,
 			p2pDevFsmRunEventScanRequest(prAdapter, prMsgHdr);
 		else
 			p2pRoleFsmRunEventScanRequest(prAdapter, prMsgHdr);
-
-		prMsgHdr = NULL;
-		/* Both p2pDevFsmRunEventScanRequest and
-		 * p2pRoleFsmRunEventScanRequest
-		 * free prMsgHdr before return,
-		 * so prMsgHdr is needed to be NULL.
-		 */
 	} while (FALSE);
 
 	/*
@@ -206,14 +154,13 @@ void p2pFsmRunEventChGrant(IN struct ADAPTER *prAdapter,
 		prP2pBssInfo =
 			GET_BSS_INFO_BY_INDEX(prAdapter,
 				prMsgChGrant->ucBssIndex);
-		if (!prP2pBssInfo)
-			break;
+
 		prAdapter->prP2pInfo->eConnState = P2P_CNN_NORMAL;
 		prAdapter->prP2pInfo->ucExtendChanFlag = 0;
 
 		DBGLOG(P2P, TRACE, "P2P Run Event Channel Grant\n");
 
-#if CFG_SISO_SW_DEVELOP
+#if ((CFG_SISO_SW_DEVELOP == 1) || (CFG_SUPPORT_SPE_IDX_CONTROL == 1))
 		/* Driver record granted CH in BSS info */
 		prP2pBssInfo->fgIsGranted = TRUE;
 		prP2pBssInfo->eBandGranted = prMsgChGrant->eRfBand;
@@ -351,23 +298,10 @@ void p2pFsmRunEventWfdSettingUpdate(IN struct ADAPTER *prAdapter,
 					&(prP2pRoleFsmInfo
 					->rP2pRoleFsmGetStatisticsTimer),
 					(3 * P2P_ROLE_GET_STATISTICS_TIME));
-			else {
+			else
 				cnmTimerStopTimer(prAdapter,
 					&prP2pRoleFsmInfo
 					->rP2pRoleFsmGetStatisticsTimer);
-				/* Reset linkscore */
-				prWfdCfgSettings->u4LinkScore = 0;
-			}
-
-			/* Force RTS to protect WFD packet */
-			wlanSetForceRTS(prAdapter,
-				prWfdCfgSettings->ucWfdEnable);
-
-			/* Update WMM to add BA immediately */
-			if (prWfdCfgSettings->ucWfdEnable == 1) {
-				nicQmUpdateWmmParms(prAdapter,
-					prP2pRoleFsmInfo->ucBssIndex);
-			}
 		}
 #endif
 
@@ -477,5 +411,27 @@ void p2pFsmRunEventTxCancelWait(IN struct ADAPTER *prAdapter,
 	} while (FALSE);
 
 }				/* p2pFsmRunEventTxCancelWait */
+
+struct BSS_DESC *p2pGetTargetBssDesc(
+	IN struct ADAPTER *prAdapter,
+	IN uint8_t ucBssIndex) {
+
+	uint8_t i = 0;
+
+	for (i = 0 ; i < BSS_P2P_NUM; i++) {
+		if (!prAdapter->rWifiVar.aprP2pRoleFsmInfo[i])
+			continue;
+
+		if (prAdapter->rWifiVar.aprP2pRoleFsmInfo[i]->ucBssIndex
+			== ucBssIndex)
+			break;
+	}
+
+	if (i >= BSS_P2P_NUM)
+		return NULL;
+
+	return prAdapter->rWifiVar.aprP2pRoleFsmInfo[i]
+		->rJoinInfo.prTargetBssDesc;
+}
 
 #endif /* CFG_ENABLE_WIFI_DIRECT */

@@ -250,3 +250,4 @@ void GDL_VOIDF(void);
 	GDL_ASSERT(LINK_ID_IS_VALID(link_id), ret, "invalid link_id: %d", link_id)
 
 #endif /* _GPS_DL_LOG_H */
+
