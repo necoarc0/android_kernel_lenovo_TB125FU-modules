@@ -129,79 +129,79 @@ static unsigned int mtk_common_gpu_memory_usage(void)
 static int mtk_common_gpu_utilization_show(struct seq_file *m, void *v)
 {
 #if IS_ENABLED(CONFIG_MALI_MIDGARD_DVFS) && IS_ENABLED(CONFIG_MALI_MTK_DVFS_POLICY)
-	unsigned int util_active, util_3d, util_ta, util_compute, cur_opp_idx;
+    unsigned int util_active, util_3d, util_ta, util_compute, cur_opp_idx;
 
-	mtk_common_update_gpu_utilization();
+    mtk_common_update_gpu_utilization();
 
 #if defined(CONFIG_MTK_GPUFREQ_V2)
-	cur_opp_idx = mtk_common_gpufreq_bringup() ?
-		0 : gpufreq_get_cur_oppidx(TARGET_DEFAULT);
+    cur_opp_idx = mtk_common_gpufreq_bringup() ?
+        0 : gpufreq_get_cur_oppidx(TARGET_DEFAULT);
 #else
-	cur_opp_idx = mtk_common_gpufreq_bringup() ?
-		0 : mt_gpufreq_get_cur_freq_index();
+    cur_opp_idx = mtk_common_gpufreq_bringup() ?
+        0 : mt_gpufreq_get_cur_freq_index();
 #endif /* CONFIG_MTK_GPUFREQ_V2 */
 
-	util_active = mtk_common_get_util_active();
-	util_3d = mtk_common_get_util_3d();
-	util_ta = mtk_common_get_util_ta();
-	util_compute = mtk_common_get_util_compute();
+    util_active = mtk_common_get_util_active();
+    util_3d = mtk_common_get_util_3d();
+    util_ta = mtk_common_get_util_ta();
+    util_compute = mtk_common_get_util_compute();
 
-	seq_printf(m, "ACTIVE=%u 3D/TA/COMPUTE=%u/%u/%u OPP_IDX=%u MFG_PWR=%d\n",
-	           util_active, util_3d, util_ta, util_compute, cur_opp_idx, mfg_powered);
+    seq_printf(m, "ACTIVE=%u 3D/TA/COMPUTE=%u/%u/%u OPP_IDX=%u MFG_PWR=%d\n",
+               util_active, util_3d, util_ta, util_compute, cur_opp_idx, mfg_powered);
 #else
-	seq_puts(m, "GPU DVFS doesn't be enabled\n");
+    seq_puts(m, "GPU DVFS doesn't be enabled\n");
 #endif
 
-	return 0;
+    return 0;
 }
 DEFINE_PROC_SHOW_ATTRIBUTE(mtk_common_gpu_utilization_show);
 
 static int mtk_common_gpu_memory_show(struct seq_file *m, void *v)
 {
 #if IS_ENABLED(CONFIG_MALI_MTK_MEM_TRACK)
-	struct kbase_device *kbdev = (struct kbase_device *)mtk_common_get_kbdev();
-	struct kbase_context *kctx;
-	unsigned int trylock_count = 0;
+    struct kbase_device *kbdev = (struct kbase_device *)mtk_common_get_kbdev();
+    struct kbase_context *kctx;
+    unsigned int trylock_count = 0;
 
-	if (IS_ERR_OR_NULL(kbdev))
-		return -1;
+    if (IS_ERR_OR_NULL(kbdev))
+        return -1;
 
-	lockdep_off();
+    lockdep_off();
 
-	mutex_lock(&memtrack_lock);
-	while (!mutex_trylock(&kbdev->kctx_list_lock)) {
-		if (trylock_count > 3) {
-			pr_info("[%s] lock held, bypass memory usage query", __func__);
-			seq_printf(m, "<INVALID>");
-			goto out_lock_held;
-		}
-		trylock_count ++;
-		udelay(10);
-	}
+    mutex_lock(&memtrack_lock);
+    while (!mutex_trylock(&kbdev->kctx_list_lock)) {
+        if (trylock_count > 3) {
+            pr_info("[%s] lock held, bypass memory usage query", __func__);
+            seq_printf(m, "<INVALID>");
+            goto out_lock_held;
+        }
+        trylock_count ++;
+        udelay(10);
+    }
 
-	/* output the total memory usage */
-	seq_printf(m, "%-16s  %10u\n",
-	           kbdev->devname,
-	           atomic_read(&(kbdev->memdev.used_pages)));
-	list_for_each_entry(kctx, &kbdev->kctx_list, kctx_list_link) {
-		/* output the memory usage and cap for each kctx */
-		seq_printf(m, "  %s-0x%p %10u %10u\n",
-		           "kctx",
-		           kctx,
-		           atomic_read(&(kctx->used_pages)),
-		           kctx->tgid);
-	}
-	mutex_unlock(&kbdev->kctx_list_lock);
+    /* output the total memory usage */
+    seq_printf(m, "%-16s  %10u\n",
+               kbdev->devname,
+               atomic_read(&(kbdev->memdev.used_pages)));
+    list_for_each_entry(kctx, &kbdev->kctx_list, kctx_list_link) {
+        /* output the memory usage and cap for each kctx */
+        seq_printf(m, "  %s-0x%p %10u %10u\n",
+                   "kctx",
+                   kctx,
+                   atomic_read(&(kctx->used_pages)),
+                   kctx->tgid);
+    }
+    mutex_unlock(&kbdev->kctx_list_lock);
 
 out_lock_held:
-	mutex_unlock(&memtrack_lock);
+    mutex_unlock(&memtrack_lock);
 
-	lockdep_on();
+    lockdep_on();
 #else
-	seq_puts(m, "GPU mem_profile doesn't be enabled\n");
+    seq_puts(m, "GPU mem_profile doesn't be enabled\n");
 #endif
 
-	return 0;
+    return 0;
 }
 DEFINE_PROC_SHOW_ATTRIBUTE(mtk_common_gpu_memory);
 
