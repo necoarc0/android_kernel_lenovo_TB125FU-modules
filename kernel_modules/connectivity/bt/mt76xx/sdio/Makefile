@@ -5,7 +5,7 @@
 # Necessary Check
 
 
-ccflags-y += -imacros $(AUTOCONF_H)
+ccflags-y += -imacros $(KERNEL_OUT)/include/generated/autoconf.h
 
 MODULE_NAME := btmtksdio
 obj-m += $(MODULE_NAME).o
