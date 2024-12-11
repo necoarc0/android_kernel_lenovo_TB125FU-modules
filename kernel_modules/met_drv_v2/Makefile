@@ -1,18 +1,5 @@
 MTK_PLATFORM := $(subst ",,$(CONFIG_MTK_PLATFORM))
 MTK_FAMILY_PLATFORM := $(MTK_PLATFORM)
-ifeq ($(CONFIG_MACH_MT6833),y)
-    MTK_PLATFORM := mt6833
-endif
-ifeq ($(CONFIG_MACH_MT6893),y)
-    MTK_PLATFORM := mt6893
-endif
-ifeq ($(CONFIG_MACH_MT6877),y)
-    MTK_PLATFORM := mt6877
-endif
-ifeq ($(CONFIG_MACH_MT6781),y)
-    MTK_PLATFORM := mt6781
-endif
-
 MET_ROOT_DIR := $(src)
 MET_COMMON_DIR := $(wildcard $(MET_ROOT_DIR)/common)
 MET_BUILD_DEFAULT := n
