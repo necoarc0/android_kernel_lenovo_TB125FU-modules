@@ -303,7 +303,8 @@ else ifeq ($(CONFIG_MTK_COMBO_WIFI_HIF), ut)
 else ifeq ($(CONFIG_MTK_COMBO_WIFI_HIF), none)
 	ccflags-y += -D_HIF_NONE=1
 else
-    $(error Unsuppoted HIF=$(CONFIG_MTK_COMBO_WIFI_HIF)!!)
+    $(info Unsuppoted HIF=$(CONFIG_MTK_COMBO_WIFI_HIF)!!)
+    ccflags-y += -D_HIF_UNKNOWN=1  
 endif
 
 ifneq ($(CFG_CFG80211_VERSION),)
