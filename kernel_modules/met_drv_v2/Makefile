@@ -45,6 +45,5 @@ else #CONFIG_MODULES = n
 endif
 
 ifeq ($(MET_BUILD_DEFAULT),y)
-    MET_DEF_DIR := $(MET_ROOT_DIR)/default
-    include $(MET_DEF_DIR)/Kbuild
+    include $(MET_ROOT_DIR)/default/Kbuild
 endif
