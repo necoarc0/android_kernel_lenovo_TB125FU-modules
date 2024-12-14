@@ -3,9 +3,6 @@ MTK_FAMILY_PLATFORM := $(MTK_PLATFORM)
 MET_ROOT_DIR := $(src)
 MET_COMMON_DIR := $(wildcard $(MET_ROOT_DIR)/common)
 MET_BUILD_DEFAULT := n
-$(info MET_ROOT_DIR: $(MET_ROOT_DIR))
-$(info MET_DEF_DIR: $(MET_DEF_DIR))
-$(info MET_PLF_DIR: $(MET_PLF_DIR))
 
 ifneq ($(MTK_PLATFORM),)
     MET_PLF_DIR := $(wildcard $(MET_ROOT_DIR)/$(MTK_PLATFORM))
