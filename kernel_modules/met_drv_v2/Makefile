@@ -1,6 +1,6 @@
 MTK_PLATFORM := $(subst ",,$(CONFIG_MTK_PLATFORM))
 MTK_FAMILY_PLATFORM := $(MTK_PLATFORM)
-MET_ROOT_DIR := $(src)
+MET_ROOT_DIR := $(pwd)
 MET_COMMON_DIR := $(wildcard $(MET_ROOT_DIR)/common)
 MET_BUILD_DEFAULT := n
 
